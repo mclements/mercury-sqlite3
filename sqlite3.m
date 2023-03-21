@@ -10,8 +10,9 @@
 :- import_module char.
 :- import_module io.
 :- import_module maybe.
+:- import_module list.
 
-% :- import_module int64.
+:- import_module float.
 
 %-----------------------------------------------------------------------------%
 
@@ -31,13 +32,6 @@
     --->    num(int)
     ;       name(string).
 
-:- type bind_value
-    --->    null
-    ;       int(int)
-    %;      int64(int64)
-    ;       text_by_reference(string)
-    ;       blob_by_reference(c_pointer, int).
-
 :- type step_result
     --->    done
     ;       row
@@ -49,6 +43,24 @@
 
 :- type column
     --->    column(int).
+
+:- type column_type
+   --->  integer
+   ;     float
+   ;     text
+   ;     blob
+   ;     null.
+
+:- type data_type
+   --->  null
+   ;     int(int)
+   ;     float(float)
+   ;     text(string)
+   ;     blob(c_pointer, int).
+
+:- type row_type == list(data_type).
+
+:- type table_type == list(row_type).
 
 :- type sqlite_error % exception type
     --->    sqlite_error(string).
@@ -96,10 +108,13 @@
 :- pred prepare(db(RwRo)::in, string::in, maybe_error(stmt)::out,
     io::di, io::uo) is det.
 
-:- pred bind(db(RwRo)::in, stmt::in, bind_index::in, bind_value::in,
+:- pred bind(db(RwRo)::in, stmt::in, bind_index::in, data_type::in,
     maybe_error::out, io::di, io::uo) is det.
 
 :- pred bind_int(db(RwRo)::in, stmt::in, bind_index::in, int::in,
+    maybe_error::out, io::di, io::uo) is det.
+
+:- pred bind_float(db(RwRo)::in, stmt::in, bind_index::in, float::in,
     maybe_error::out, io::di, io::uo) is det.
 
     % This is "unsafe" in that the GC could collect the string while it is
@@ -136,8 +151,8 @@
 :- pred column_int(stmt::in, column::in, int::out,
     io::di, io::uo) is det.
 
-% :- pred column_int64(stmt::in, column::in, int64::out,
-%     io::di, io::uo) is det.
+:- pred column_float(stmt::in, column::in, float::out,
+    io::di, io::uo) is det.
 
 :- pred column_text(stmt::in, column::in, string::out,
     io::di, io::uo) is det.
@@ -160,22 +175,22 @@
     %
 :- pred with_stmt(
     pred(db(RwRo), stmt, T, io, io)::in(pred(in, in, out(TI), di, uo) is det),
-    db(RwRo)::in, string::in, assoc_list(bind_index, bind_value)::in,
+    db(RwRo)::in, string::in, assoc_list(bind_index, data_type)::in,
     T::out(TI), io::di, io::uo) is det.
 
 :- pred with_prepared_stmt(
     pred(db(RwRo), stmt, T, io, io)::in(pred(in, in, out(TI), di, uo) is det),
-    db(RwRo)::in, stmt::in, assoc_list(bind_index, bind_value)::in,
+    db(RwRo)::in, stmt::in, assoc_list(bind_index, data_type)::in,
     T::out(TI), io::di, io::uo) is det.
 
 :- pred with_stmt_acc(
     pred(db(RwRo), stmt, T, T, io, io)::in(pred(in, in, in, out, di, uo) is det),
-    db(RwRo)::in, string::in, assoc_list(bind_index, bind_value)::in,
+    db(RwRo)::in, string::in, assoc_list(bind_index, data_type)::in,
     T::in, T::out, io::di, io::uo) is det.
 
 :- pred with_stmt_acc3(
     pred(db(RwRo), stmt, maybe_error, A, A, B, B, C, C, io, io),
-    db(RwRo), string, assoc_list(bind_index, bind_value),
+    db(RwRo), string, assoc_list(bind_index, data_type),
     maybe_error, A, A, B, B, C, C, io, io).
 :- mode with_stmt_acc3(
     in(pred(in, in, out, in, out, in, out, in, out, di, uo) is det),
@@ -185,13 +200,13 @@
     in, in, in, out, in, out, in, out, array_di, array_uo, di, uo) is det.
 
 :- pred bind_checked(db(RwRo)::in, stmt::in,
-    assoc_list(bind_index, bind_value)::in, io::di, io::uo) is det.
+    assoc_list(bind_index, data_type)::in, io::di, io::uo) is det.
 
 :- pred step_ok(db(RwRo)::in, stmt::in, step_result::out(step_result_nonerror),
     io::di, io::uo) is det.
 
 :- pred step_ok_keep_alive(db(RwRo)::in, stmt::in,
-    assoc_list(bind_index, bind_value)::in,
+    assoc_list(bind_index, data_type)::in,
     step_result::out(step_result_nonerror), io::di, io::uo) is det.
 
 %-----------------------------------------------------------------------------%
@@ -455,16 +470,14 @@ bind(Db, Stmt, IndexType, Value, Res, !IO) :-
     ;
         Value = int(Int),
         bind_int(Db, Stmt, IndexType, Int, Res, !IO)
-    /*
     ;
-        Value = int64(Int64),
-        bind_int64(Db, Stmt, IndexType, Int64, Res, !IO)
-    */
+        Value = float(Float),
+        bind_float(Db, Stmt, IndexType, Float, Res, !IO)
     ;
-        Value = text_by_reference(String),
+        Value = text(String),
         unsafe_bind_text(Db, Stmt, IndexType, String, Res, !IO)
     ;
-        Value = blob_by_reference(Pointer, SizeBytes),
+        Value = blob(Pointer, SizeBytes),
         unsafe_bind_blob(Db, Stmt, IndexType, Pointer, SizeBytes, Res, !IO)
     ).
 
@@ -503,33 +516,32 @@ bind_int(Db, Stmt, IndexType, Value, Res, !IO) :-
 
 %-----------------------------------------------------------------------------%
 
-/*
-:- pred bind_int64(db(RwRo)::in, stmt::in, bind_index::in, int64::in,
-    maybe_error::out, io::di, io::uo) is det.
+%% :- pred bind_float(db(RwRo)::in, stmt::in, bind_index::in, float::in,
+%%     maybe_error::out, io::di, io::uo) is det.
 
-bind_int64(Db, Stmt, IndexType, Value, Res, !IO) :-
+bind_float(Db, Stmt, IndexType, Value, Res, !IO) :-
     (
         IndexType = num(Index)
     ;
         IndexType = name(Name),
         bind_parameter_index(Stmt, Name, Index, !IO)
     ),
-    bind_int64_2(Db, Stmt, Index, Value, Rc, Error, !IO),
+    bind_float_2(Db, Stmt, Index, Value, Rc, Error, !IO),
     ( Rc = 1 ->
         Res = ok
     ;
         Res = error(Error)
     ).
 
-:- pred bind_int64_2(db(RwRo)::in, stmt::in, int::in, int64::in, int::out,
+:- pred bind_float_2(db(RwRo)::in, stmt::in, int::in, float::in, int::out,
     string::out, io::di, io::uo) is det.
 
 :- pragma foreign_proc("C",
-    bind_int64_2(Db::in, Stmt::in, Index::in, Value::in, Rc::out, Error::out,
+    bind_float_2(Db::in, Stmt::in, Index::in, Value::in, Rc::out, Error::out,
         _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure, thread_safe, tabled_for_io],
 "
-    if (SQLITE_OK == sqlite3_bind_int64(Stmt, Index, Value)) {
+    if (SQLITE_OK == sqlite3_bind_double(Stmt, Index, Value)) {
         Rc = 1;
         Error = MR_make_string_const("""");
     } else {
@@ -537,7 +549,6 @@ bind_int64(Db, Stmt, IndexType, Value, Res, !IO) :-
         Error = _msqlite_copy_errmsg(Db);
     }
 ").
-*/
 
 %-----------------------------------------------------------------------------%
 
@@ -755,20 +766,18 @@ column_int(Stmt, column(Col), Int, !IO) :-
 
 %-----------------------------------------------------------------------------%
 
-/*
-column_int64(Stmt, column(Col), Int, !IO) :-
-    column_int64_2(Stmt, Col, Int, !IO).
+column_float(Stmt, column(Col), Float, !IO) :-
+    column_float_2(Stmt, Col, Float, !IO).
 
-:- pred column_int64_2(stmt::in, int::in, int64::out,
+:- pred column_float_2(stmt::in, int::in, float::out,
     io::di, io::uo) is det.
 
 :- pragma foreign_proc("C",
-    column_int64_2(Stmt::in, Col::in, Int::out, _IO0::di, _IO::uo),
+    column_float_2(Stmt::in, Col::in, Float::out, _IO0::di, _IO::uo),
     [will_not_call_mercury, promise_pure, thread_safe, tabled_for_io],
 "
-    Int = sqlite3_column_int64(Stmt, Col);
+    Float = sqlite3_column_double(Stmt, Col);
 ").
-*/
 
 %-----------------------------------------------------------------------------%
 

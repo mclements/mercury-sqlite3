@@ -9,7 +9,7 @@
     % unreachable from being collected.  Then we can bind strings with
     % SQLITE_STATIC so SQLite does not need its own copy of the string.
     %
-:- pred keep_alive(assoc_list(bind_index, bind_value)::in, io::di, io::uo)
+:- pred keep_alive(assoc_list(bind_index, data_type)::in, io::di, io::uo)
     is det.
 
 %-----------------------------------------------------------------------------%
