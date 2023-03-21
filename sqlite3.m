@@ -161,7 +161,23 @@
     io::di, io::uo) is det.
 
 :- pred column_blob(stmt::in, column::in, c_pointer::out, int::out,
+		    io::di, io::uo) is det.
+
+:- pred column_type(stmt::in, column::in, int::out,
+		    io::di, io::uo) is det.
+
+:- pred column(stmt::in, column::in, data_type::out, io::di, io::uo) is det.
+
+:- pred column_count(stmt::in, int::out, io::di, io::uo) is det.
+
+:- pred column_name(stmt::in, column::in, string::out,
     io::di, io::uo) is det.
+
+:- pred data_count(stmt::in, int::out, io::di, io::uo) is det.
+
+:- pred db_handle(stmt::in, db(T)::out, io::di, io::uo) is det.
+
+:- func column_type_id(column_type) = int.
 
 %-----------------------------------------------------------------------------%
 
@@ -826,6 +842,70 @@ column_blob(Stmt, column(Col), Pointer, SizeBytes, !IO) :-
     Pointer = (MR_Word) sqlite3_column_blob(Stmt, Col);
     SizeBytes = sqlite3_column_bytes(Stmt, Col);
 ").
+
+:- pragma foreign_proc("C",
+    column_type(Stmt::in, Col::in, Int::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, thread_safe, tabled_for_io],
+"
+    Int =  sqlite3_column_type(Stmt, Col);
+").
+
+column_type_id(integer) = 1.
+column_type_id(float) = 2.
+column_type_id(text) = 3.
+column_type_id(blob) = 4.
+column_type_id(null) = 5.
+
+column(Stmt, column(Col), Res, !IO) :-
+    column_type(Stmt, column(Col), Type, !IO),
+    (Type = 1 -> column_int(Stmt, column(Col), Int, !IO),
+		 Res = int(Int)
+    ;
+    Type = 2 -> column_float(Stmt, column(Col), Float, !IO),
+		Res = float(Float)
+    ;
+    Type = 3 -> column_text(Stmt, column(Col), Text, !IO),
+		Res = text(Text)
+    ;
+    Type = 4 -> column_blob(Stmt, column(Col), Pointer, SizeBytes, !IO),
+		Res = blob(Pointer, SizeBytes)
+    ;
+    % Type = 5 ->
+    Res = null
+    ).
+
+:- pragma foreign_proc("C",
+    column_count(Stmt::in, Count::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, thread_safe, tabled_for_io],
+"
+    Count =  sqlite3_column_count(Stmt);
+").
+
+:- pragma foreign_proc("C",
+    data_count(Stmt::in, Count::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, thread_safe, tabled_for_io],
+"
+    Count =  sqlite3_data_count(Stmt);
+").
+
+column_name(Stmt, column(Col), Str, !IO) :-
+    column_name_2(Stmt, Col, Str, !IO).
+
+:- pred column_name_2(stmt::in, int::in, string::out,
+    io::di, io::uo) is det.
+
+:- pragma foreign_proc("C",
+    column_name_2(Stmt::in, Col::in, Str::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, thread_safe, tabled_for_io],
+"
+    const char *s =  sqlite3_column_name(Stmt, Col);
+    if (s) {
+        MR_make_aligned_string_copy_msg(Str, (const char *)s, MR_ALLOC_ID);
+    } else {
+        Str = MR_make_string_const("""");
+    }
+").
+
 
 %-----------------------------------------------------------------------------%
 
