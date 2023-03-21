@@ -1,0 +1,10 @@
+*~
+*.a
+*.so
+*.mh
+*.err
+*.init
+Mercury/
+Mercury.options
+test_parsing
+test_sqlite3
