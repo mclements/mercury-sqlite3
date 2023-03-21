@@ -333,6 +333,130 @@ init_multithreaded(Res, !IO) :-
 ").
 
 %-----------------------------------------------------------------------------%
+% User-defined functions -- test code
+
+%% The following code works to create an "identity" function in SQLite
+
+:- pragma foreign_code("C", "
+static void noopfunc(sqlite3_context *context, int argc, sqlite3_value **argv) {
+  assert( argc==1 );
+  sqlite3_result_value(context, argv[0]);
+}
+").
+
+:- pragma foreign_proc("C",
+    create_example_function(Db::in, Error::out, _IO0::di, _IO::uo),
+    [promise_pure, thread_safe, tabled_for_io],
+"
+    int rc;
+    rc = sqlite3_create_function(Db, ""identity"", 1, SQLITE_UTF8, NULL, &noopfunc, 
+                                 NULL, NULL);
+    if (rc != SQLITE_OK) {
+        Error = MR_make_string(MR_ALLOC_ID,
+            ""sqlite3_create_function returned: %d"", rc);
+        } else {
+            Error = MR_make_string_const("""");
+        }
+").
+
+%% However the following code does not work for "identity2":(
+
+:- type context.
+:- pragma foreign_type("C", context, "sqlite3_context *").
+
+:- type sqlite3_value_array.
+:- pragma foreign_type("C", sqlite3_value_array, "sqlite3_value **").
+
+:- pred testfun(context::in, sqlite3_value_array::in) is det.
+:- pragma foreign_proc("C",
+    testfun(Context::in, Argv::in),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    sqlite3_result_value(Context, Argv[0]);
+").
+
+:- pred noopfunc2(context::in, int32::in, sqlite3_value_array::in) is det.
+noopfunc2(Context, _Argc, Argv) :-
+    testfun(Context, Argv).
+:- pragma foreign_export("C", noopfunc2(in, in, in), "noopfunc2").
+
+:- pragma foreign_code("C", "
+static void noopfunc2_wrapper(sqlite3_context *context, int argc, sqlite3_value **argv) {
+  noopfunc2(context, argc, argv);
+}
+").
+
+:- pragma foreign_proc("C",
+    create_example_function2(Db::in, Error::out, _IO0::di, _IO::uo),
+    [promise_pure, thread_safe, tabled_for_io],
+"
+    int rc;
+    rc = sqlite3_create_function(Db, ""identity2"", 1, SQLITE_UTF8, NULL, &noopfunc2_wrapper, 
+                                 NULL, NULL);
+    if (rc != SQLITE_OK) {
+        Error = MR_make_string(MR_ALLOC_ID,
+            ""sqlite3_create_function returned: %d"", rc);
+        } else {
+            Error = MR_make_string_const("""");
+        }
+").
+
+
+:- import_module int32.
+
+:- type sqlite3_value.
+:- pragma foreign_type("C", sqlite3_value, "sqlite3_value *").
+
+:- pred value_array_get(sqlite3_value_array::in, int32::in, sqlite3_value::out) is det.
+:- pragma foreign_proc("C",
+    value_array_get(Array::in, Index::in, Value::out),
+    [will_not_call_mercury, promise_pure, thread_safe],
+"
+    Value = Array[Index];
+").
+
+:- pred result_value(context::in, sqlite3_value::in) is det.
+:- pragma foreign_proc("C",
+    result_value(Context::in, Value::in),
+    [will_not_call_mercury, promise_pure, thread_safe, tabled_for_io],
+"
+    int rc;
+    rc = sqlite3_result_value(Context, Value);
+").
+
+:- pred noopfunc3(context::in, int32::in, sqlite3_value_array::in) is det.
+noopfunc3(Context, _Argc, Argv) :-
+    %% %% Argc = 1i32,
+    value_array_get(Argv, 0i32, Arg),
+    result_value(Context, Arg).
+:- pragma foreign_export("C", noopfunc3(in, in, in), "noopfunc3").
+
+:- pragma foreign_code("C", "
+static void noopfunc3_wrapper(
+  sqlite3_context *context,
+  int argc,
+  sqlite3_value **argv
+){
+  noopfunc3(context, argc, argv);
+}
+").
+
+:- pragma foreign_proc("C",
+    create_example_function3(Db::in, Error::out, _IO0::di, _IO::uo),
+    [promise_pure, thread_safe, tabled_for_io],
+"
+    int rc;
+    rc = sqlite3_create_function(Db, ""identity3"", 1, SQLITE_UTF8, NULL, &noopfunc3_wrapper, 
+                                 NULL, NULL);
+    if (rc != SQLITE_OK) {
+        Error = MR_make_string(MR_ALLOC_ID,
+            ""sqlite3_create_function returned: %d"", rc);
+        } else {
+            Error = MR_make_string_const("""");
+        }
+").
+
+%-----------------------------------------------------------------------------%
 
 synchronous(off,    "OFF").
 synchronous(normal, "NORMAL").
