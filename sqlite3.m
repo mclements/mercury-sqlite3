@@ -225,15 +225,50 @@
     assoc_list(bind_index, data_type)::in,
     step_result::out(step_result_nonerror), io::di, io::uo) is det.
 
+:- pred insert_row(db(rw)::in, stmt::in, maybe_error::out,
+    io::di, io::uo) is det.
+
+:- pred get_header(db(rw)::in, stmt::in, maybe_error(list(string))::out,
+    io::di, io::uo) is det.
+
+:- pred get_row(db(rw)::in, stmt::in, maybe_error(row_type)::out,
+    io::di, io::uo) is det.
+
+:- pred get_rows(db(rw)::in, stmt::in, maybe_error(table_type)::out,
+		 io::di, io::uo) is det.
+
+:- pred get_cols(db(rw)::in, stmt::in, list(list(data_type))::out,
+    io::di, io::uo) is det.
+
+:- pred write_table(db(rw)::in, % Db
+		    string::in, % TableName
+		    list(string)::in, % Headers
+		    list(list(data_type))::in, % Data
+		    io::di, io::uo) is det.
+
+:- pred read_query(db(rw)::in, % Db
+		   string::in, % Query
+		   maybe_error(list(string))::out, % Headers
+		   maybe_error(list(list(data_type)))::out, % Data
+		   io::di, io::uo) is det.
+
+:- pred create_example_function(db(_)::in, string::out, io::di, io::uo) is det.
+:- pred create_example_function2(db(_)::in, string::out, io::di, io::uo) is det.
+:- pred create_example_function3(db(_)::in, string::out, io::di, io::uo) is det.
+
+
 %-----------------------------------------------------------------------------%
 %-----------------------------------------------------------------------------%
 
 :- implementation.
 
 :- import_module exception.
-:- import_module list.
+%% :- import_module list.
 :- import_module string.
 :- import_module pair.
+:- import_module int.
+:- import_module cord.
+:- import_module parsing_utils, unit.
 
 :- include_module sqlite3.keep_alive.
 :- import_module sqlite3.keep_alive.
@@ -1047,6 +1082,243 @@ step_ok_keep_alive(Db, Stmt, KeepAlive, StepResult, !IO) :-
         StepResult = error(Error),
         throw(sqlite_error(Error))
     ).
+
+get_header(Db, Stmt, Res, !IO) :-
+    step(Db, Stmt, StepResult, !IO),
+    (
+        StepResult = done,
+        Res = error("expected row")
+    ;
+        StepResult = row,
+	column_count(Stmt, Count, !IO),
+	list.map_foldl((pred(I::in,Y::out,IO0::di,IO1::uo) is det :-
+			    column_name(Stmt, column(int.(I-1)), Y, IO0, IO1)),
+		       1..Count,
+		       Val,
+		       !IO),
+             Res = ok(Val)
+    ;
+        StepResult = error(Error),
+        Res = error(Error)
+    ).
+
+get_row(Db, Stmt, Res, !IO) :-
+    step(Db, Stmt, StepResult, !IO),
+    (
+        StepResult = done,
+        Res = error("expected row")
+    ;
+        StepResult = row,
+	column_count(Stmt, Count, !IO),
+	list.map_foldl((pred(I::in,Y::out,IO0::di,IO1::uo) is det :-
+			    column(Stmt, column(int.(I-1)), Y, IO0, IO1)),
+		       1..Count,
+		       Val,
+		       !IO),
+             Res = ok(Val)
+    ;
+        StepResult = error(Error),
+        Res = error(Error)
+    ).
+
+get_rows(Db, Stmt, Res, !IO) :-
+    column_count(Stmt, Count, !IO),
+    get_rows_helper(Db, Stmt, Count, init, Res, !IO).
+
+:- pred get_rows_helper(db(rw)::in, stmt::in, int::in, cord(row_type)::in,
+			maybe_error(table_type)::out,
+		 io::di, io::uo) is det.
+
+get_rows_helper(Db, Stmt, Count, Agg, Res, !IO) :-
+    step(Db, Stmt, StepResult, !IO),
+    (
+        StepResult = done,
+        Res = ok(to_list(Agg))
+    ;
+        StepResult = row,
+	list.map_foldl((pred(I::in,Y::out,IO0::di,IO1::uo) is det :-
+			    column(Stmt, column(int.(I-1)), Y, IO0, IO1)),
+		       1..Count,
+		       Val,
+		       !IO),
+        get_rows_helper(Db, Stmt, Count, snoc(Agg,Val), Res, !IO)
+    ;
+        StepResult = error(_),
+        Res = error("get_rows_helper failed")
+    ).
+
+insert_row(Db, Stmt, Res, !IO) :-
+    step(Db, Stmt, StepResult, !IO),
+    (
+        StepResult = done,
+        Res = ok
+    ;
+        StepResult = row,
+        Res = error("unexpected row")
+    ;
+        StepResult = error(Error),
+        Res = error(Error)
+    ).
+
+:- pragma foreign_proc("C",
+    db_handle(Stmt::in, Db::out, _IO0::di, _IO::uo),
+    [will_not_call_mercury, promise_pure, thread_safe, tabled_for_io],
+"
+    Db = sqlite3_db_handle(Stmt);
+").
+
+:- type cords == list(cord(data_type)).
+
+get_cols(Db, Stmt, Res, !IO) :-
+    column_count(Stmt, Count, !IO),
+    Init = map(func(_) = cord.init, 1..Count),
+    get_cols_helper(Db, Stmt, Count, Init, Cols, !IO),
+    Res = map(to_list, Cols).
+
+:- pred get_cols_helper(db(rw)::in, stmt::in, int::in, cords::in, cords::out,
+		 io::di, io::uo) is det.
+
+get_cols_helper(Db, Stmt, Count, Cords, Res, !IO) :-
+    step(Db, Stmt, StepResult, !IO),
+    (
+        StepResult = done,
+        Res = Cords
+    ;
+        StepResult = row,
+	map_corresponding_foldl((pred(I::in,Cord0::in,Cord1::out,IO0::di,IO1::uo) is det :-
+				     column(Stmt, column(int.(I-1)), Y, IO0, IO1),
+				     Cord1 = snoc(Cord0,Y)),
+				1..Count,
+				Cords,
+				Cords1,
+				!IO),
+        get_cols_helper(Db, Stmt, Count, Cords1, Res, !IO)
+    ;
+        StepResult = error(_),
+        Res = []
+    ).
+
+%% infix function composition -- not exported 
+:- func (func(T2) = T3) `o` (func(T1) = T2) = (func(T1) = T3) is det.
+F `o` G = (func(X) = F(G(X))). % functional order: G first!
+
+:- func data_to_column_type(data_type) = column_type.
+data_to_column_type(null) = null.
+data_to_column_type(int(_)) = integer.
+data_to_column_type(float(_)) = float.
+data_to_column_type(text(_)) = text.
+data_to_column_type(blob(_,_)) = blob.
+
+:- func column_type_to_string(column_type) = string.
+column_type_to_string(null) = "NULL".
+column_type_to_string(integer) = "INTEGER".
+column_type_to_string(float) = "FLOAT".
+column_type_to_string(text) = "TEXT".
+column_type_to_string(blob) = "BLOB".
+
+%% Should the data_type names reflect Sqlite or Mercury?
+
+%% Using strings to generate SQL is generally a bad idea:(
+%% This can be done in a more type-safe manner:)
+write_table(Db, TableName, Headers, Data, !IO) :-
+    Data = [Row1|_] ->
+	%% valid_table_name(TableName) = yes, % Error: Unification with `bool.yes' can fail.
+	%% TODO check Headers
+	Types = map(column_type_to_string `o` data_to_column_type, Row1),
+	ColumnDeclaration =
+	  map_corresponding(func(Header,Type) = Header ++ " " ++ Type, Headers, Types),
+	ColumnDeclarations = join_list(", ", ColumnDeclaration),
+	format("create table %s (%s)", [s(TableName), s(ColumnDeclarations)], CreateSql),
+	exec(Db, CreateSql, _, !IO),
+	Placeholders = join_list(", ", map(func(_) = "?", Row1)),
+	format("insert into %s values (%s)", [s(TableName), s(Placeholders)], InsertSql),
+	prepare(Db, InsertSql, MaybeStmt, !IO),
+	(MaybeStmt = ok(Stmt) ->
+	     Ncol = length(Row1),
+	     MakeRow = (func(Row) = map_corresponding(func(I,Datum) = num(I) - Datum, 1..Ncol, Row)),
+	     foldl((pred(Row::in, IO0::di, IO1::uo) is det :-
+			with_prepared_stmt(insert_row, Db, Stmt,
+					   MakeRow(Row),
+					   _, IO0, IO1)),
+		   Data, !IO),
+	     end_transaction(Db, _, !IO),
+	     finalize(Stmt, !IO)
+	;
+	print_line("Failed to compile insert statement", !IO))
+    ;
+    print_line("Empty data", !IO).
+
+read_query(Db, Query, Headers, Data, !IO) :-
+    prepare(Db, Query, MaybeStmt, !IO),
+    (MaybeStmt = ok(Stmt) ->
+	 with_prepared_stmt(get_header, Db, Stmt, [], Headers, !IO),
+	 with_prepared_stmt(get_rows, Db, Stmt, [], Data, !IO),
+	 finalize(Stmt, !IO)
+    ;
+    Headers = error("no headers as query compile failed"),
+    Data = error("no data as query compile failed")).
+
+
+%% Not currently exported
+:- func transpose(list(list(T))) = list(list(T)) is det.
+transpose(List : list(list(T))) = Y :-
+    List = [Head|_] ->
+	(some [!Agg] (
+	     !:Agg : list(cord(T)) = map(func(_) = init, 1..length(Head)),
+	     foldl((pred(Row::in,Agg0::in,Agg1::out) is det :-
+			Agg1 = map_corresponding(snoc, Agg0, Row)),
+		   List,
+		   !Agg),
+	     Y = map(to_list,!.Agg)))
+    ;
+    Y = [[]].
+
+%-----------------------------------------------------------------------------%
+% Parsing facilities - not currently exported
+
+:- pred parse_standard_name(src::in, string::out, ps::in, ps::out) is semidet.
+parse_standard_name(Src, Name, !PS) :-
+    Letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+    Digits = "0123456789",
+    Parser = (pred(Src2::in, Char2::out, PS0::in, PS1::out) is semidet :-
+		  char_in_class(Letters ++ "_" ++ Digits, Src2, Char2, PS0, PS1)),
+    char_in_class(Letters ++ "_", Src, Char1, !PS),
+    zero_or_more(Parser, Src, Rest, !PS),
+    from_char_list([Char1 | Rest], Name).
+
+:- pred parse_var_name(src::in, string::out, ps::in, ps::out) is semidet.
+parse_var_name(Src, Name, PS0, PS3) :-
+    (string_literal('"', Src, Name1, PS0, PS1) -> Name = "\"" ++ Name1 ++ "\"", PS3=PS1
+    ;
+    parse_standard_name(Src, Name, PS0, PS3)),
+    %% Exclude if semicolon in Name
+    not member(';', to_char_list(Name)).
+
+:- pred parse_table_name(src::in, string::out, ps::in, ps::out) is semidet.
+parse_table_name(Src, Name, PS0, PS4) :-
+    parse_var_name(Src, SchemaName, PS0, PS1),
+    next_char(Src, '.', PS1, PS2),
+    parse_var_name(Src, TableName, PS2, PS3) ->
+	Name = SchemaName ++ "." ++ TableName, PS4 = PS3
+    ;
+    parse_var_name(Src, Name, PS0, PS4).
+
+:- func valid_table_name(string) = bool is det.
+valid_table_name(String) = Test :-
+    new_src_and_ps(String, Src, PS0),
+    parse_table_name(Src, _, PS0, PS1),
+    eof(Src, _, PS1, _) -> Test = yes
+    ;
+    Test = no.
+
+:- func valid_column_name(string) = bool is det.
+valid_column_name(String) = Test :-
+    new_src_and_ps(String, Src, PS0),
+    parse_var_name(Src, _, PS0, PS1),
+    eof(Src, _, PS1, _) -> Test = yes
+    ;
+    Test = no.
+
 
 %-----------------------------------------------------------------------------%
 % vim: ft=mercury ts=4 sts=4 sw=4 et
