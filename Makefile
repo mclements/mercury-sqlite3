@@ -7,9 +7,13 @@ compile: test_sqlite3.m
 
 .PHONY = clean
 .PHONY += test
+.PHONY += impure
 
 test: test_parsing.m
 	mmc --make test_parsing && ./test_parsing
+
+impure: test_sqlite3_impure.m sqlite3_impure.m
+	mmc --make test_sqlite3_impure -lsqlite3 && ./test_sqlite3_impure
 
 clean:
 	rm -rf Mercury
