@@ -360,8 +360,9 @@ static void noopfunc(sqlite3_context *context, int argc, sqlite3_value **argv) {
 ").
 
 %% However the following code does not work for identity2() in SQLite:(
-%% create_example_function2 (foreign_proc) <- noopfunc2_wrapper (C) <-
-%%    noopfunc2 (foreign_export) <- testfun (foreign_proc)
+%% create_example_function2 (foreign_proc) <- noopfunc2_wrapper (C) <- noopfunc2 (foreign_export) <- testfun (foreign_proc)
+%% *or* 
+%% create_example_function2 (foreign_proc) <- noopfunc2 (foreign_export) <- testfun (foreign_proc)
 
 :- type context.
 :- pragma foreign_type("C", context, "sqlite3_context *").
@@ -393,6 +394,7 @@ static void noopfunc2_wrapper(sqlite3_context *context, int argc, sqlite3_value 
     [may_call_mercury, thread_safe, tabled_for_io],
 "
     int rc;
+    /* use either &noopfunc2 or &noopfunc2_wrapper */
     rc = sqlite3_create_function(Db, ""identity2"", 1, SQLITE_UTF8, NULL, &noopfunc2,
                                  NULL, NULL);
     if (rc != SQLITE_OK) {
