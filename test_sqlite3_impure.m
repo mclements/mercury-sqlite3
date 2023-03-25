@@ -3,23 +3,23 @@
 :- interface.
 :- import_module io.
 
-:- impure pred main(io::di, io::uo) is det.
+:- pred main(io::di, io::uo) is det.
 
 :- implementation.
 :- import_module sqlite3_impure, maybe, list, pair, float, string, bool.
 
 main(!IO) :-
-    impure test(!IO).
+    test(!IO).
 
-:- func maybe_string(data_type) = maybe(string).
-maybe_string(Value) = (if Value = text(String) then yes(String) else no).
-:- func maybe_float(data_type) = maybe(float).
-maybe_float(Value) = (if Value = float(Float) then yes(Float) else no).
-:- func maybe_int(data_type) = maybe(int).
-maybe_int(Value) = (if Value = int(Int) then yes(Int) else no).
+%% :- func maybe_string(data_type) = maybe(string).
+%% maybe_string(Value) = (if Value = text(String) then yes(String) else no).
+%% :- func maybe_float(data_type) = maybe(float).
+%% maybe_float(Value) = (if Value = float(Float) then yes(Float) else no).
+%% :- func maybe_int(data_type) = maybe(int).
+%% maybe_int(Value) = (if Value = int(Int) then yes(Int) else no).
 
-:- func maybe_null(data_type) = maybe(data_type).
-maybe_null(Value) = (if Value = null then yes(null) else no).
+%% :- func maybe_null(data_type) = maybe(data_type).
+%% maybe_null(Value) = (if Value = null then yes(null) else no).
 
 %% :- func reader(column_type) = (func(data) = T(column_type)).
 %% reader(ColumnType) = F :-
@@ -34,21 +34,20 @@ maybe_null(Value) = (if Value = null then yes(null) else no).
 %% :- func read3b(r) = list(data_type).
 %% read3b(r(A,B,C)) = [text(A), int(B), float(C)].
 
-:- impure pred test(io::di, io::uo) is det.
+:- pred test(io::di, io::uo) is det.
 test(!IO) :-
     open_rw(":memory:", normal, MaybeDb, !IO),
     (MaybeDb = ok(Db) ->
 	 (
-	     Data = map(func(I) = [text("a"), float(float.float(I))], 1..100_000),
+	     Data = map(func(I) = [text("a"), float(float.float(I))], 1..10),
 	     write_table(Db, "temp", ["s", "x"], Data, !IO),
 	     create_example_function(Db, _, !IO),
-	     Sql = "select identity(s), count(*), sum(x) from temp group by s",
+	     Sql = "select s, count(*), sum(identity(x)) from temp group by s",
 	     read_query(Db, Sql, Headers, Output, !IO),
 	     print_line(Headers, !IO),
 	     print_line(Output, !IO),
-	     impure create_example_function2(Db, Error, !IO),
-	     print_line(Error, !IO),
-	     Sql2 = "select identity2(s), count(*), sum(x) from temp group by s",
+	     create_example_function2(Db, _, !IO),
+	     Sql2 = "select s, count(*), sum(identity2(x)) from temp group by s",
 	     read_query(Db, Sql2, Headers2, Output2, !IO),
 	     print_line(Headers2, !IO),
 	     print_line(Output2, !IO)),

@@ -253,7 +253,7 @@
 		   io::di, io::uo) is det.
 
 :- pred create_example_function(db(_)::in, string::out, io::di, io::uo) is det.
-:- impure pred create_example_function2(db(_)::in, string::out, io::di, io::uo) is det.
+:- pred create_example_function2(db(_)::in, string::out, io::di, io::uo) is det.
 %% :- pred create_example_function3(db(_)::in, string::out, io::di, io::uo) is det.
 
 
@@ -339,14 +339,16 @@ init_multithreaded(Res, !IO) :-
 
 :- pragma foreign_code("C", "
 static void noopfunc(sqlite3_context *context, int argc, sqlite3_value **argv) {
-  assert( argc==1 );
-  sqlite3_result_value(context, argv[0]);
+    assert( argc==1 );
+    double y = sqlite3_value_double(argv[0]);
+    sqlite3_result_double(context, y);
+    printf(""%f\\n"",y); // for debugging
 }
 ").
 
 :- pragma foreign_proc("C",
     create_example_function(Db::in, Error::out, _IO0::di, _IO::uo),
-    [promise_pure, thread_safe, tabled_for_io],
+    [promise_pure, thread_safe, tabled_for_io, will_not_call_mercury],
 "
     int rc;
     rc = sqlite3_create_function(Db, ""identity"", 1, SQLITE_UTF8, NULL, &noopfunc, 
@@ -370,32 +372,35 @@ static void noopfunc(sqlite3_context *context, int argc, sqlite3_value **argv) {
 :- type sqlite3_value_array.
 :- pragma foreign_type("C", sqlite3_value_array, "sqlite3_value **").
 
-:- impure pred testfun(context::in, sqlite3_value_array::in) is det.
+:- impure pred testfun(context::in, int32::in, sqlite3_value_array::in) is det.
 :- pragma foreign_proc("C",
-    testfun(Context::in, Argv::in),
-    [may_call_mercury, thread_safe],
+    testfun(Context::in, Argc::in, Argv::in),
+    [will_not_call_mercury, thread_safe],
 "
-    sqlite3_result_value(Context, Argv[0]);
+    assert( Argc==1 );
+    double y = sqlite3_value_double(Argv[0]);
+    sqlite3_result_double(Context, y);
+    printf(""%f\\n"",y); // for debugging
 ").
+:- pragma foreign_export("C", testfun(in, in, in), "testfun").
 
-:- impure pred noopfunc2(context::in, int32::in, sqlite3_value_array::in) is det.
-noopfunc2(Context, _Argc, Argv) :-
-    impure testfun(Context, Argv).
-:- pragma foreign_export("C", noopfunc2(in, in, in), "noopfunc2").
+%% :- impure pred noopfunc2(context::in, int32::in, sqlite3_value_array::in) is det.
+%% noopfunc2(Context, Argc, Argv) :-
+%%     impure testfun(Context, Argc, Argv).
+%% :- pragma foreign_export("C", noopfunc2(in, in, in), "noopfunc2").
 
-:- pragma foreign_code("C", "
-static void noopfunc2_wrapper(sqlite3_context *context, int argc, sqlite3_value **argv) {
-  noopfunc2(context, argc, argv);
-}
-").
+%% :- pragma foreign_code("C", "
+%% static void noopfunc2_wrapper(sqlite3_context *context, int argc, sqlite3_value **argv) {
+%%   noopfunc2(context, argc, argv);
+%% }
+%% ").
 
 :- pragma foreign_proc("C",
-    create_example_function2(Db::in, Error::out, IO0::di, IO1::uo),
-    [may_call_mercury, thread_safe, tabled_for_io],
+    create_example_function2(Db::in, Error::out, _IO0::di, _IO1::uo),
+    [promise_pure, thread_safe, tabled_for_io, will_not_call_mercury],
 "
     int rc;
-    /* use either &noopfunc2 or &noopfunc2_wrapper */
-    rc = sqlite3_create_function(Db, ""identity2"", 1, SQLITE_UTF8, NULL, &noopfunc2,
+    rc = sqlite3_create_function(Db, ""identity2"", 1, SQLITE_UTF8, NULL, &testfun,
                                  NULL, NULL);
     if (rc != SQLITE_OK) {
         Error = MR_make_string(MR_ALLOC_ID,
@@ -403,7 +408,6 @@ static void noopfunc2_wrapper(sqlite3_context *context, int argc, sqlite3_value 
         } else {
             Error = MR_make_string_const("""");
         }
-    IO1 = IO0;
 ").
 
 %% One attempt to generalise the second approach

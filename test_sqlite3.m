@@ -39,19 +39,24 @@ test(!IO) :-
     open_rw(":memory:", normal, MaybeDb, !IO),
     (MaybeDb = ok(Db) ->
 	 (
-	     Data = map(func(I) = [text("a"), float(float.float(I))], 1..100_000),
+	     Data = map(func(I) = [text("a"), float(float.float(I))], 1..10),
 	     write_table(Db, "temp", ["s", "x"], Data, !IO),
 	     create_example_function(Db, _, !IO),
 	     Sql = "select identity(s), count(*), sum(x) from temp group by s",
 	     read_query(Db, Sql, Headers, Output, !IO),
 	     print_line(Headers, !IO),
 	     print_line(Output, !IO),
-	     create_example_function2(Db, Error, !IO),
-	     print_line(Error, !IO),
+	     create_example_function2(Db, _, !IO),
 	     Sql2 = "select identity2(s), count(*), sum(x) from temp group by s",
 	     read_query(Db, Sql2, Headers2, Output2, !IO),
 	     print_line(Headers2, !IO),
-	     print_line(Output2, !IO)),
+	     print_line(Output2, !IO),
+	     create_example_function3(Db, _, !IO),
+	     Sql3 = "select s, count(*), sum(identity3(x)) from temp group by s",
+	     read_query(Db, Sql3, Headers3, Output3, !IO),
+	     print_line(Headers3, !IO),
+	     print_line(Output3, !IO)
+	 ),
 	 close(Db, !IO)
     ;
     print_line("failed to open the database", !IO)).
