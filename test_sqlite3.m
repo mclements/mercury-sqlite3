@@ -112,6 +112,7 @@ MERCURY_CREATE_FUNCTION(Db,Error,identity,noopfunc)
 MERCURY_CREATE_FUNCTION(Db,Error,identity2,noopfunc2)
 ").
 
+%% Currently, we need to re-define value_array_get to get `create_example_function4` to work:(
 :- pred value_array_get(sqlite3_value_array::in, int32::in, sqlite3_value::out) is det.
 :- pragma foreign_proc("C",
     value_array_get(Array::in, Index::in, Value::out),

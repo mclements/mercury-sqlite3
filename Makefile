@@ -9,7 +9,6 @@ compile: test_sqlite3.m
 
 .PHONY = clean
 .PHONY += test
-.PHONY += impure
 
 test: test_parsing.m
 	mmc --make test_parsing && ./test_parsing
