@@ -14,6 +14,8 @@
 
 :- import_module float.
 
+:- use_module int32.
+
 %-----------------------------------------------------------------------------%
 
 :- type rw ---> rw.
@@ -252,12 +254,26 @@
 		   maybe_error(list(list(data_type)))::out, % Data
 		   io::di, io::uo) is det.
 
-%% :- type sqlite3_function_type.
-:- pred create_example_function(db(_)::in, string::out, io::di, io::uo) is det.
-:- pred create_example_function2(db(_)::in, string::out, io::di, io::uo) is det.
-:- pred create_example_function3(db(_)::in, string::out, % sqlite3_function_type::in,
-				 io::di, io::uo) is det.
 
+%-----------------------------------------------------------------------------%
+%% utilities to support creating functions
+
+:- type context.
+
+:- type sqlite3_value.
+
+:- type sqlite3_value_array.
+
+:- pred value_array_get(sqlite3_value_array::in, int32::in, sqlite3_value::out) is det.
+
+:- impure pred result_value(context::in, sqlite3_value::in) is det.
+
+:- pred value_double(sqlite3_value::in, float::out) is det.
+
+:- impure pred result_double(context::in, float::in) is det.
+
+%% testing code
+:- pred create_example_function3(db(_)::in, string::out, io::di, io::uo) is det.
 
 %-----------------------------------------------------------------------------%
 %-----------------------------------------------------------------------------%
@@ -265,12 +281,12 @@
 :- implementation.
 
 :- import_module exception.
-%% :- import_module list.
 :- import_module string.
 :- import_module pair.
 :- import_module int.
 :- import_module cord.
-:- import_module parsing_utils, unit.
+:- import_module parsing_utils.
+:- import_module unit.
 
 :- include_module sqlite3.keep_alive.
 :- import_module sqlite3.keep_alive.
@@ -335,11 +351,10 @@ init_multithreaded(Res, !IO) :-
 ").
 
 %-----------------------------------------------------------------------------%
-% User-defined functions -- test code
 
-:- pragma foreign_code("C", 
-"#define MERCURY_CREATE_FUNCTION(Db,Error,NAME,FUNC) \
-    int rc = sqlite3_create_function(Db, # NAME, 1, SQLITE_UTF8, NULL, & FUNC, \
+:- pragma foreign_decl("C", 
+"#define MERCURY_CREATE_FUNCTION(Db,Error,Name,Func) \
+    int rc = sqlite3_create_function(Db, # Name, 1, SQLITE_UTF8, NULL, & Func, \
                                  NULL, NULL); \
     if (rc != SQLITE_OK) { \
         Error = MR_make_string(MR_ALLOC_ID, \
@@ -349,58 +364,12 @@ init_multithreaded(Res, !IO) :-
         }
 ").
 
-%% The following code creates an "identity" function in SQLite
-%% create_example_function (foreign_proc) <- noopfunc (C)
-:- pragma foreign_code("C", "
-static void noopfunc(sqlite3_context *context, int argc, sqlite3_value **argv) {
-  assert( argc==1 );
-  sqlite3_result_value(context, argv[0]);
-}
-").
-
-:- pragma foreign_proc("C",
-    create_example_function(Db::in, Error::out, _IO0::di, _IO::uo),
-    [promise_pure, thread_safe, tabled_for_io],
-"
-MERCURY_CREATE_FUNCTION(Db,Error,identity,noopfunc)
-"
-).
-
-%% 
-%% create_example_function2 (foreign_proc) <- noopfunc2 (foreign_export) <- noopfunc2 (foreign_proc)
-
-:- type context.
 :- pragma foreign_type("C", context, "sqlite3_context *").
 
-:- type sqlite3_value_array.
-:- pragma foreign_type("C", sqlite3_value_array, "sqlite3_value **").
-
-:- impure pred noopfunc2(context::in, int32::in, sqlite3_value_array::in, io::di, io::uo) is det.
-:- pragma foreign_proc("C",
-    noopfunc2(Context::in, Argc::in, Argv::in, _IO0::di, _IO1::uo),
-    [will_not_call_mercury, tabled_for_io],
-"
-    assert( Argc==1 );
-    sqlite3_result_value(Context, Argv[0]);
-").
-:- pragma foreign_export("C", noopfunc2(in, in, in, di, uo), "noopfunc2").
-
-:- pragma foreign_proc("C",
-    create_example_function2(Db::in, Error::out, _IO0::di, _IO1::uo),
-    [promise_pure, thread_safe, tabled_for_io],
-"
-MERCURY_CREATE_FUNCTION(Db,Error,identity2,noopfunc2)
-").
-
-%% Further generalise
-%% create_example_function3 (foreign_proc) <- noopfunc3(foreign_export) <- noopfunc3 (Mercury) <- functions (foreign_proc)
-
-:- import_module int32.
-
-:- type sqlite3_value.
 :- pragma foreign_type("C", sqlite3_value, "sqlite3_value *").
 
-:- pred value_array_get(sqlite3_value_array::in, int32::in, sqlite3_value::out) is det.
+:- pragma foreign_type("C", sqlite3_value_array, "sqlite3_value **").
+
 :- pragma foreign_proc("C",
     value_array_get(Array::in, Index::in, Value::out),
     [promise_pure, will_not_call_mercury, thread_safe],
@@ -408,7 +377,6 @@ MERCURY_CREATE_FUNCTION(Db,Error,identity2,noopfunc2)
     Value = Array[Index];
 ").
 
-:- impure pred result_value(context::in, sqlite3_value::in) is det.
 :- pragma foreign_proc("C",
     result_value(Context::in, Value::in),
     [will_not_call_mercury, thread_safe],
@@ -416,15 +384,14 @@ MERCURY_CREATE_FUNCTION(Db,Error,identity2,noopfunc2)
     sqlite3_result_value(Context, Value);
 ").
 
-:- pred value_double(sqlite3_value::in, float::out) is det.
 :- pragma foreign_proc("C",
     value_double(Value::in, Float::out),
     [promise_pure, will_not_call_mercury, thread_safe],
 "
     Float = sqlite3_value_double(Value);
+    /* printf(\"%f\\n\",Float); */
 ").
 
-:- impure pred result_double(context::in, float::in) is det.
 :- pragma foreign_proc("C",
     result_double(Context::in, Value::in),
     [will_not_call_mercury, thread_safe],
@@ -432,15 +399,10 @@ MERCURY_CREATE_FUNCTION(Db,Error,identity2,noopfunc2)
     sqlite3_result_double(Context, Value);
 ").
 
-%% :- pragma foreign_type("C", sqlite3_function_type,
-%% 		       "void (*xFunc)(sqlite3_context*,int,sqlite3_value**)").
-
 :- impure pred noopfunc3(context::in, int32::in, sqlite3_value_array::in) is det.
 noopfunc3(Context, _Argc, Argv) :-
-    %% Argc = 1i32,
     value_array_get(Argv, 0i32, Arg),
-    sqlite3.value_double(Arg, Float),
-    impure sqlite3.result_double(Context, Float).
+    impure result_value(Context, Arg).
 :- pragma foreign_export("C", noopfunc3(in, in, in), "noopfunc3").
 
 :- pragma foreign_proc("C",
@@ -449,6 +411,9 @@ noopfunc3(Context, _Argc, Argv) :-
 "
 MERCURY_CREATE_FUNCTION(Db,Error,identity3,noopfunc3)
 ").
+
+%% :- pragma foreign_type("C", sqlite3_function_type,
+%% 		       "void (*xFunc)(sqlite3_context*,int,sqlite3_value**)").
 
 %-----------------------------------------------------------------------------%
 
