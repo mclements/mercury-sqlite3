@@ -264,6 +264,8 @@
 
 :- type sqlite3_value_array.
 
+:- type sqlite3_function.
+
 :- pred value_array_get(sqlite3_value_array::in, int32::in, sqlite3_value::out) is det.
 
 :- impure pred result_value(context::in, sqlite3_value::in) is det.
@@ -272,6 +274,8 @@
 
 :- impure pred result_double(context::in, float::in) is det.
 
+:- pred create_sqlite3_function(db(_)::in, string::in, sqlite3_function::in,
+				string::out, io::di, io::uo) is det.
 
 %-----------------------------------------------------------------------------%
 %-----------------------------------------------------------------------------%
@@ -350,23 +354,15 @@ init_multithreaded(Res, !IO) :-
 
 %-----------------------------------------------------------------------------%
 
-:- pragma foreign_decl("C", 
-"#define SQLITE3_CREATE_FUNCTION(Db,Error,Name,Func) \
-    int rc = sqlite3_create_function(Db, # Name, 1, SQLITE_UTF8, NULL, & Func, \
-                                 NULL, NULL); \
-    if (rc != SQLITE_OK) { \
-        Error = MR_make_string(MR_ALLOC_ID, \
-            \"sqlite3_create_function returned: %d\", rc); \
-        } else { \
-            Error = MR_make_string_const(\"\"); \
-        }
-").
-
 :- pragma foreign_type("C", context, "sqlite3_context *").
 
 :- pragma foreign_type("C", sqlite3_value, "sqlite3_value *").
 
 :- pragma foreign_type("C", sqlite3_value_array, "sqlite3_value **").
+
+:- pragma foreign_decl("C", 
+		       "typedef void (*sqlite3_function)(sqlite3_context*,int,sqlite3_value**);").
+:- pragma foreign_type("C", sqlite3_function, "sqlite3_function").
 
 :- pragma foreign_proc("C",
     value_array_get(Array::in, Index::in, Value::out),
@@ -397,8 +393,20 @@ init_multithreaded(Res, !IO) :-
     sqlite3_result_double(Context, Value);
 ").
 
-%% :- pragma foreign_type("C", sqlite3_function_type,
-%% 		       "void (*xFunc)(sqlite3_context*,int,sqlite3_value**)").
+:- pragma foreign_proc("C",
+    create_sqlite3_function(Db::in, SqlName::in, Func::in, Error::out, _IO0::di, _IO::uo),
+    [promise_pure, thread_safe, tabled_for_io],
+"
+    int rc = sqlite3_create_function(Db, SqlName, 1, SQLITE_UTF8, NULL, Func, 
+                                 NULL, NULL); 
+    if (rc != SQLITE_OK) { 
+        Error = MR_make_string(MR_ALLOC_ID,
+            \"sqlite3_create_function returned: %d\", rc);
+        } else {
+            Error = MR_make_string_const(\"\");
+        }
+"
+).
 
 %-----------------------------------------------------------------------------%
 

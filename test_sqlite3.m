@@ -26,13 +26,14 @@ maybe_null(Value) = (if Value = null then yes(null) else no).
 %%     ColumnType = integer -> F = (func(Data) = maybe_int(Data))
 %%     ;
 
-:- func read3(maybe_error(list(data_type))) = {maybe(string), maybe(int), maybe(float)}.
+:- func read3(list(data_type)) = {maybe(string), maybe(int), maybe(float)}.
 read3(Value) =
-(if Value = ok([A,B,C]) then {maybe_string(A),maybe_int(B),maybe_float(C)} else {no,no,no}).
+(if Value = [A,B,C] then {maybe_string(A),maybe_int(B),maybe_float(C)} else {no,no,no}).
 
 :- type r ---> r(string,int,float).
-:- func read3b(r) = list(data_type).
-read3b(r(A,B,C)) = [text(A), int(B), float(C)].
+:- func read3b(list(data_type)) = maybe(r).
+read3b(Value) =
+(if Value = [text(A),int(B),float(C)] then yes(r(A,B,C)) else no).
 
 :- pred test(io::di, io::uo) is det.
 test(!IO) :-
@@ -44,21 +45,20 @@ test(!IO) :-
 	     read_query(Db, "select * from temp", Headers0, Output0, !IO),
 	     print_line(Headers0, !IO),
 	     print_line(Output0, !IO),
-	     create_example_function(Db, _, !IO),
-	     Sql = "select s, count(*), sum(identity(x)) from temp group by s",
+	     Data2 = append(map(func(I) = [text("a"), float(float.float(I))], 1..1000),
+			    map(func(I) = [text("b"), float(float.float(I))], 1..500)),
+	     write_table(Db, "temp2", ["s", "x"], Data2, !IO),
+	     create_sqlite3_function(Db, "identity", c_noopfunc, _, !IO),
+	     Sql = "select s, count(*), sum(identity(x)) from temp2 group by s",
 	     read_query(Db, Sql, Headers, Output, !IO),
 	     print_line(Headers, !IO),
 	     print_line(Output, !IO),
-	     create_example_function2(Db, _, !IO),
-	     Sql2 = "select s, count(*), sum(identity2(x)) from temp group by s",
+	     create_sqlite3_function(Db, "identity2", c_noopfunc2, _, !IO),
+	     Sql2 = "select s, count(*), sum(identity2(x)) from temp2 group by s",
 	     read_query(Db, Sql2, Headers2, Output2, !IO),
 	     print_line(Headers2, !IO),
-	     print_line(Output2, !IO),
-	     create_example_function3(Db, _, !IO),
-	     Sql3 = "select s, count(*), sum(identity3(x)) from temp group by s",
-	     read_query(Db, Sql3, Headers3, Output3, !IO),
-	     print_line(Headers3, !IO),
-	     print_line(Output3, !IO)
+	     Out2 = (ok(Out) = Output2 -> map(read3b, Out) ; []),
+	     print_line(Out2, !IO)
 	 ),
 	 close(Db, !IO)
     ;
@@ -74,52 +74,26 @@ test(!IO) :-
 ").
 
 %% The following code creates an "identity" function in SQLite
-%% create_example_function (foreign_proc) <- noopfunc (C)
+%% create_sqlite3_function <- noopfunc (C+ptr)
 :- pragma foreign_code("C", "
 static void noopfunc(sqlite3_context *context, int argc, sqlite3_value **argv) {
   assert( argc==1 );
   sqlite3_result_value(context, argv[0]);
 }
 ").
+:- func c_noopfunc = sqlite3_function.
+:- pragma foreign_proc("C", c_noopfunc = (Ptr::out),
+		       [thread_safe, promise_pure],
+		       "Ptr = noopfunc;").
 
-:- pred create_example_function(db(_)::in, string::out, io::di, io::uo) is det.
-:- pragma foreign_proc("C",
-    create_example_function(Db::in, Error::out, _IO0::di, _IO::uo),
-    [promise_pure, thread_safe, tabled_for_io],
-"
-SQLITE3_CREATE_FUNCTION(Db,Error,identity,noopfunc)
-"
-).
-
-%% create_example_function2 (foreign_proc) <- noopfunc2 (foreign_export) <- noopfunc2 (foreign_proc)
-:- impure pred noopfunc2(context::in, int32::in, sqlite3_value_array::in, io::di, io::uo) is det.
-:- pragma foreign_proc("C",
-    noopfunc2(Context::in, Argc::in, Argv::in, _IO0::di, _IO1::uo),
-    [will_not_call_mercury, tabled_for_io],
-"
-    assert( Argc==1 );
-    sqlite3_result_value(Context, Argv[0]);
-").
-:- pragma foreign_export("C", noopfunc2(in, in, in, di, uo), "noopfunc2").
-
-:- pred create_example_function2(db(_)::in, string::out, io::di, io::uo) is det.
-:- pragma foreign_proc("C",
-    create_example_function2(Db::in, Error::out, _IO0::di, _IO1::uo),
-    [promise_pure, thread_safe, tabled_for_io],
-"
-SQLITE3_CREATE_FUNCTION(Db,Error,identity2,noopfunc2)
-").
-
-:- impure pred noopfunc3(context::in, int32::in, sqlite3_value_array::in) is det.
-noopfunc3(Context, _Argc, Argv) :-
-    sqlite3.value_array_get(Argv, 0i32, Arg),
+%% create_sqlite3_function <- noopfunc2 (foreign_export+ptr) <- noopfunc2 (impure pred)
+:- impure pred noopfunc2(context::in, int32::in, sqlite3_value_array::in) is det.
+noopfunc2(Context, _Argc, Argv) :-
+    value_array_get(Argv, 0i32, Arg),
     impure result_value(Context, Arg).
-:- pragma foreign_export("C", noopfunc3(in, in, in), "noopfunc3").
+:- pragma foreign_export("C", noopfunc2(in, in, in), "noopfunc2").
+:- func c_noopfunc2 = sqlite3_function.
+:- pragma foreign_proc("C", c_noopfunc2 = (Ptr::out),
+		       [thread_safe, promise_pure],
+		       "Ptr = noopfunc2;").
 
-:- pred create_example_function3(db(_)::in, string::out, io::di, io::uo) is det.
-:- pragma foreign_proc("C",
-    create_example_function3(Db::in, Error::out, _IO0::di, _IO::uo),
-    [promise_pure, thread_safe, tabled_for_io],
-"
-  SQLITE3_CREATE_FUNCTION(Db,Error,identity3,noopfunc3)
-").
