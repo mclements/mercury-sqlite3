@@ -1,6 +1,6 @@
 #+title: mercury-sqlite3: Mercury module for SQLite
 #+author: Mark Clements (based on the pushpull module by Peter Wang)
-#+options: toc:nil
+#+options: toc:nil num:nil
 
 * Introduction
 
@@ -23,8 +23,36 @@ The extensions include:
 - =read_query= predicate
 - Utilities and types to create user-defined functions, including =create_sqlite3_function=
 
+* Some details
 
-* Example
+** =data_type= type
+
+Rows are represented as =list(data_type)=. The type =data_type= is defined by:
+
+#+begin_src prolog :eval no
+:- type data_type
+   --->  null
+   ;     int(int)
+   ;     float(float)
+   ;     text(string)
+   ;     blob(c_pointer, int).
+#+end_src
+
+Examples of the values returned by =read_query= are given in the test example below.
+
+** Creating user-defined SQLite functions
+
+The main predicate =create_sqlite3_function(Db, SqlName, Func, Failure, !IO)=, where =Db= is the database, =SqlName= is a string for the name of the aggregate, =Func= is a C pointer to the SQLite function, =Failure= is the output string for whether the operation failed, and =!IO= is for input/output.
+
+#+begin_src prolog :eval no
+:- pred create_sqlite3_function(db(_)::in, string::in, sqlite3_function::in,
+				string::out, io::di, io::uo) is det.
+#+end_src
+
+The main challenge is how to define the SQLite function. This can be defined in C and then return a pointer to Mercury for that function. Alternatively, the function can be defined in Mercury, exported to C and then a pointer to that function can be used. Examples of each are given in the test code below.
+
+
+* Test example
 
 #+begin_src sh :exports results :results org
 cat test_sqlite3.m
