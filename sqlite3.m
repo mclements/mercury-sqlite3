@@ -1,5 +1,7 @@
-% pushpull - a bidirectional IMAP/Maildir synchronisation tool.
+% sqlite3 - Mercury interface with the SQLite library
+% Based on pushpull - a bidirectional IMAP/Maildir synchronisation tool.
 % Copyright (C) 2015 Peter Wang
+% Copyright (C) 2023 Mark Clements
 
 :- module sqlite3.
 :- interface.
