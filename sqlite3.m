@@ -272,8 +272,6 @@
 
 :- impure pred result_double(context::in, float::in) is det.
 
-%% testing code
-:- pred create_example_function3(db(_)::in, string::out, io::di, io::uo) is det.
 
 %-----------------------------------------------------------------------------%
 %-----------------------------------------------------------------------------%
@@ -353,7 +351,7 @@ init_multithreaded(Res, !IO) :-
 %-----------------------------------------------------------------------------%
 
 :- pragma foreign_decl("C", 
-"#define MERCURY_CREATE_FUNCTION(Db,Error,Name,Func) \
+"#define SQLITE3_CREATE_FUNCTION(Db,Error,Name,Func) \
     int rc = sqlite3_create_function(Db, # Name, 1, SQLITE_UTF8, NULL, & Func, \
                                  NULL, NULL); \
     if (rc != SQLITE_OK) { \
@@ -397,19 +395,6 @@ init_multithreaded(Res, !IO) :-
     [will_not_call_mercury, thread_safe],
 "
     sqlite3_result_double(Context, Value);
-").
-
-:- impure pred noopfunc3(context::in, int32::in, sqlite3_value_array::in) is det.
-noopfunc3(Context, _Argc, Argv) :-
-    value_array_get(Argv, 0i32, Arg),
-    impure result_value(Context, Arg).
-:- pragma foreign_export("C", noopfunc3(in, in, in), "noopfunc3").
-
-:- pragma foreign_proc("C",
-    create_example_function3(Db::in, Error::out, _IO0::di, _IO::uo),
-    [promise_pure, thread_safe, tabled_for_io],
-"
-MERCURY_CREATE_FUNCTION(Db,Error,identity3,noopfunc3)
 ").
 
 %% :- pragma foreign_type("C", sqlite3_function_type,
@@ -816,7 +801,7 @@ step(Db, Stmt, Res, !IO) :-
 
 :- pragma foreign_proc("C",
     step_2(Db::in, Stmt::in, Res::out, Error::out, _IO0::di, _IO::uo),
-    [will_not_call_mercury, promise_pure, thread_safe, tabled_for_io],
+    [may_call_mercury, promise_pure, thread_safe, tabled_for_io],
 "
     int rc = sqlite3_step(Stmt);
     if (rc == SQLITE_DONE) {

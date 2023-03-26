@@ -41,6 +41,9 @@ test(!IO) :-
 	 (
 	     Data = map(func(I) = [text("a"), float(float.float(I))], 1..5),
 	     write_table(Db, "temp", ["s", "x"], Data, !IO),
+	     read_query(Db, "select * from temp", Headers0, Output0, !IO),
+	     print_line(Headers0, !IO),
+	     print_line(Output0, !IO),
 	     create_example_function(Db, _, !IO),
 	     Sql = "select s, count(*), sum(identity(x)) from temp group by s",
 	     read_query(Db, Sql, Headers, Output, !IO),
@@ -55,12 +58,7 @@ test(!IO) :-
 	     Sql3 = "select s, count(*), sum(identity3(x)) from temp group by s",
 	     read_query(Db, Sql3, Headers3, Output3, !IO),
 	     print_line(Headers3, !IO),
-	     print_line(Output3, !IO),
-	     create_example_function4(Db, _, !IO),
-	     Sql4 = "select s, count(*), sum(identity4(x)) from temp group by s",
-	     read_query(Db, Sql4, Headers4, Output4, !IO),
-	     print_line(Headers4, !IO),
-	     print_line(Output4, !IO)
+	     print_line(Output3, !IO)
 	 ),
 	 close(Db, !IO)
     ;
@@ -89,7 +87,7 @@ static void noopfunc(sqlite3_context *context, int argc, sqlite3_value **argv) {
     create_example_function(Db::in, Error::out, _IO0::di, _IO::uo),
     [promise_pure, thread_safe, tabled_for_io],
 "
-MERCURY_CREATE_FUNCTION(Db,Error,identity,noopfunc)
+SQLITE3_CREATE_FUNCTION(Db,Error,identity,noopfunc)
 "
 ).
 
@@ -109,28 +107,19 @@ MERCURY_CREATE_FUNCTION(Db,Error,identity,noopfunc)
     create_example_function2(Db::in, Error::out, _IO0::di, _IO1::uo),
     [promise_pure, thread_safe, tabled_for_io],
 "
-MERCURY_CREATE_FUNCTION(Db,Error,identity2,noopfunc2)
+SQLITE3_CREATE_FUNCTION(Db,Error,identity2,noopfunc2)
 ").
 
-%% Currently, we need to re-define value_array_get to get `create_example_function4` to work:(
-:- pred value_array_get(sqlite3_value_array::in, int32::in, sqlite3_value::out) is det.
-:- pragma foreign_proc("C",
-    value_array_get(Array::in, Index::in, Value::out),
-    [promise_pure,will_not_call_mercury, thread_safe],
-"
-    Value = Array[Index];
-").
-
-:- impure pred noopfunc4(context::in, int32::in, sqlite3_value_array::in) is det.
-noopfunc4(Context, _Argc, Argv) :-
-    test_sqlite3.value_array_get(Argv, 0i32, Arg),
+:- impure pred noopfunc3(context::in, int32::in, sqlite3_value_array::in) is det.
+noopfunc3(Context, _Argc, Argv) :-
+    sqlite3.value_array_get(Argv, 0i32, Arg),
     impure result_value(Context, Arg).
-:- pragma foreign_export("C", noopfunc4(in, in, in), "noopfunc4").
+:- pragma foreign_export("C", noopfunc3(in, in, in), "noopfunc3").
 
-:- pred create_example_function4(db(_)::in, string::out, io::di, io::uo) is det.
+:- pred create_example_function3(db(_)::in, string::out, io::di, io::uo) is det.
 :- pragma foreign_proc("C",
-    create_example_function4(Db::in, Error::out, _IO0::di, _IO::uo),
+    create_example_function3(Db::in, Error::out, _IO0::di, _IO::uo),
     [promise_pure, thread_safe, tabled_for_io],
 "
-  MERCURY_CREATE_FUNCTION(Db,Error,identity4,noopfunc4)
+  SQLITE3_CREATE_FUNCTION(Db,Error,identity3,noopfunc3)
 ").
