@@ -1,0 +1,444 @@
+#+title: mercury-sqlite3: Mercury module for SQLite
+#+author: Mark Clements (based on the pushpull module by Peter Wang)
+#+options: toc:nil
+
+* Introduction
+
+The =sqlite3= module is a modest extension of the [[https://github.com/wangp/pushpull/blob/master/src/sqlite3.m][=pushpull.sqlite3=]] module from the [[https://github.com/wangp/pushpull][=pushpull=]] module by Peter Wang. The original module by Peter included:
+- Opening and closing databases (with options)
+- Transactions
+- Execution of SQL statements
+- Prepared SQL statements
+- Binding statements
+- Stepping through statements
+- Reset and finalize statements
+- Reading results from executed statements
+- Some high-level =with= constructs, including aggregators.
+
+The extensions include:
+- A new sum type =data_type= for the output (replacing =bind_value=), with a more general =column= predicate 
+- Some predicates to work with the =with= constructs
+- Some additional information predicates, including =column_count=, =column_name=, =data_count=, =db_handle= and =column_type_id=
+- =write_table= predicate
+- =read_query= predicate
+- Utilities and types to create user-defined functions, including =create_sqlite3_function=
+
+
+* Example
+
+#+begin_src sh :exports results :results org
+cat test_sqlite3.m
+#+end_src
+
+#+RESULTS:
+#+begin_src org
+:- module test_sqlite3.
+
+:- interface.
+:- import_module io.
+
+:- pred main(io::di, io::uo) is det.
+
+:- implementation.
+:- import_module sqlite3, maybe, list, pair, float, string, bool.
+
+main(!IO) :-
+    test(!IO).
+
+:- func maybe_string(data_type) = maybe(string).
+maybe_string(Value) = (if Value = text(String) then yes(String) else no).
+:- func maybe_float(data_type) = maybe(float).
+maybe_float(Value) = (if Value = float(Float) then yes(Float) else no).
+:- func maybe_int(data_type) = maybe(int).
+maybe_int(Value) = (if Value = int(Int) then yes(Int) else no).
+
+:- func maybe_null(data_type) = maybe(data_type).
+maybe_null(Value) = (if Value = null then yes(null) else no).
+
+%% :- func reader(column_type) = (func(data) = T(column_type)).
+%% reader(ColumnType) = F :-
+%%     ColumnType = integer -> F = (func(Data) = maybe_int(Data))
+%%     ;
+
+:- func read3(list(data_type)) = {maybe(string), maybe(int), maybe(float)}.
+read3(Value) =
+(if Value = [A,B,C] then {maybe_string(A),maybe_int(B),maybe_float(C)} else {no,no,no}).
+
+:- type r ---> r(string,int,float).
+:- func read3b(list(data_type)) = maybe(r).
+read3b(Value) =
+(if Value = [text(A),int(B),float(C)] then yes(r(A,B,C)) else no).
+
+:- pred test(io::di, io::uo) is det.
+test(!IO) :-
+    open_rw(":memory:", normal, MaybeDb, !IO),
+    (MaybeDb = ok(Db) ->
+	 (
+	     Data = map(func(I) = [text("a"), float(float.float(I))], 1..5),
+	     write_table(Db, "temp", ["s", "x"], Data, !IO),
+	     read_query(Db, "select * from temp", Headers0, Output0, !IO),
+	     print_line(Headers0, !IO),
+	     print_line(Output0, !IO),
+	     Data2 = append(map(func(I) = [text("a"), float(float.float(I))], 1..1000),
+			    map(func(I) = [text("b"), float(float.float(I))], 1..500)),
+	     write_table(Db, "temp2", ["s", "x"], Data2, !IO),
+	     create_sqlite3_function(Db, "identity", c_noopfunc, _, !IO),
+	     Sql = "select s, count(*), sum(identity(x)) from temp2 group by s",
+	     read_query(Db, Sql, Headers, Output, !IO),
+	     print_line(Headers, !IO),
+	     print_line(Output, !IO),
+	     create_sqlite3_function(Db, "identity2", c_noopfunc2, _, !IO),
+	     Sql2 = "select s, count(*), sum(identity2(x)) from temp2 group by s",
+	     read_query(Db, Sql2, Headers2, Output2, !IO),
+	     print_line(Headers2, !IO),
+	     Out2 = (ok(Out) = Output2 -> map(read3b, Out) ; []),
+	     print_line(Out2, !IO)
+	 ),
+	 close(Db, !IO)
+    ;
+    print_line("failed to open the database", !IO)).
+
+
+%-----------------------------------------------------------------------------%
+% User-defined functions
+
+%% hlc.gc grade requires that sqlite3.h be included again (otherwise: unknown type names)
+:- pragma foreign_decl("C", "
+    #include <sqlite3.h>
+").
+
+%% The following code creates an "identity" function in SQLite
+%% create_sqlite3_function <- noopfunc (C+ptr)
+:- pragma foreign_code("C", "
+static void noopfunc(sqlite3_context *context, int argc, sqlite3_value **argv) {
+  assert( argc==1 );
+  sqlite3_result_value(context, argv[0]);
+}
+").
+:- func c_noopfunc = sqlite3_function.
+:- pragma foreign_proc("C", c_noopfunc = (Ptr::out),
+		       [thread_safe, promise_pure],
+		       "Ptr = noopfunc;").
+
+%% create_sqlite3_function <- noopfunc2 (foreign_export+ptr) <- noopfunc2 (impure pred)
+:- impure pred noopfunc2(context::in, int32::in, sqlite3_value_array::in) is det.
+noopfunc2(Context, _Argc, Argv) :-
+    value_array_get(Argv, 0i32, Arg),
+    impure result_value(Context, Arg).
+:- pragma foreign_export("C", noopfunc2(in, in, in), "noopfunc2").
+:- func c_noopfunc2 = sqlite3_function.
+:- pragma foreign_proc("C", c_noopfunc2 = (Ptr::out),
+		       [thread_safe, promise_pure],
+		       "Ptr = noopfunc2;").
+
+#+end_src
+
+Cleaning up from any previous compiling, then compiling and running the test example, we get:
+
+#+begin_src sh :exports results :results org
+  make clean
+  mmc --make test_sqlite3 -lsqlite3
+  ./test_sqlite3
+#+end_src
+
+#+RESULTS:
+#+begin_src org
+rm -rf Mercury
+rm -rf test_sqlite3
+ok(["s", "x"])
+ok([[text("a"), float(1.0)], [text("a"), float(2.0)], [text("a"), float(3.0)], [text("a"), float(4.0)], [text("a"), float(5.0)]])
+ok(["s", "count(*)", "sum(identity(x))"])
+ok([[text("a"), int(1000), float(500500.0)], [text("b"), int(500), float(125250.0)]])
+ok(["s", "count(*)", "sum(identity2(x))"])
+[yes(r("a", 1000, 500500.0)), yes(r("b", 500, 125250.0))]
+#+end_src
+
+
+* Detailed documentation
+
+#+begin_src sh :exports results :results org
+head -n 280 sqlite3.m | tail -n 278
+#+end_src
+
+#+RESULTS:
+#+begin_src org
+% Copyright (C) 2015 Peter Wang
+% Copyright (C) 2023 Mark Clements
+
+:- module sqlite3.
+:- interface.
+
+:- import_module array.
+:- import_module assoc_list.
+:- import_module bool.
+:- import_module char.
+:- import_module io.
+:- import_module maybe.
+:- import_module list.
+
+:- import_module float.
+
+:- use_module int32.
+
+%-----------------------------------------------------------------------------%
+
+:- type rw ---> rw.
+:- type ro ---> ro.
+
+:- type db(RwRo).
+
+:- type synchronous
+    --->    off
+    ;       normal
+    ;       full.
+
+:- type stmt.
+
+:- type bind_index
+    --->    num(int)
+    ;       name(string).
+
+:- type step_result
+    --->    done
+    ;       row
+    ;       error(string).
+
+:- inst step_result_nonerror
+    --->    done
+    ;       row.
+
+:- type column
+    --->    column(int).
+
+:- type column_type
+   --->  integer
+   ;     float
+   ;     text
+   ;     blob
+   ;     null.
+
+:- type data_type
+   --->  null
+   ;     int(int)
+   ;     float(float)
+   ;     text(string)
+   ;     blob(c_pointer, int).
+
+:- type row_type == list(data_type).
+
+:- type table_type == list(row_type).
+
+:- type sqlite_error % exception type
+    --->    sqlite_error(string).
+
+%-----------------------------------------------------------------------------%
+
+:- pred init_multithreaded(maybe_error::out, io::di, io::uo) is det.
+
+:- pred synchronous(synchronous, string).
+:- mode synchronous(in, out) is det.
+:- mode synchronous(out, in) is semidet.
+
+:- pred open_rw(string::in, synchronous::in, maybe_error(db(rw))::out,
+    io::di, io::uo) is det.
+
+:- pred open_ro(string::in, maybe_error(db(ro))::out, io::di, io::uo) is det.
+
+:- pred close(db(RwRo)::in, io::di, io::uo) is det.
+
+    % This is only good for temporarily treating a rw database connection
+    % as a ro database connection.  It should be avoided.
+    %
+:- pred rw_db_to_ro_db(db(rw)::in, db(ro)::out) is det.
+
+%-----------------------------------------------------------------------------%
+
+    % Must be paired with end_transaction or rollback_transaction.
+    %
+:- pred begin_transaction(db(RwRo)::in, maybe_error::out,
+    io::di, io::uo) is det.
+
+:- pred end_transaction(db(RwRo)::in, maybe_error::out,
+    io::di, io::uo) is det.
+
+:- pred rollback_transaction(db(RwRo)::in, maybe_error::out,
+    io::di, io::uo) is det.
+
+:- pred exec(db(RwRo)::in, string::in, maybe_error::out,
+    io::di, io::uo) is det.
+
+%-----------------------------------------------------------------------------%
+
+% Low-level interface
+
+:- pred prepare(db(RwRo)::in, string::in, maybe_error(stmt)::out,
+    io::di, io::uo) is det.
+
+:- pred bind(db(RwRo)::in, stmt::in, bind_index::in, data_type::in,
+    maybe_error::out, io::di, io::uo) is det.
+
+:- pred bind_int(db(RwRo)::in, stmt::in, bind_index::in, int::in,
+    maybe_error::out, io::di, io::uo) is det.
+
+:- pred bind_float(db(RwRo)::in, stmt::in, bind_index::in, float::in,
+    maybe_error::out, io::di, io::uo) is det.
+
+    % This is "unsafe" in that the GC could collect the string while it is
+    % still bound to the stmt.  You must keep a reference to the string while
+    % it is still bound to the stmt.
+    %
+:- pred unsafe_bind_text(db(RwRo)::in, stmt::in, bind_index::in, string::in,
+    maybe_error::out, io::di, io::uo) is det.
+
+    % This is "unsafe" in that the GC could collect the object containing
+    % the pointer address while the address is still bound to the stmt.
+    % You must keep a reference to the object while the pointer is still
+    % bound to the stmt.
+    %
+:- pred unsafe_bind_blob(db(RwRo)::in, stmt::in, bind_index::in,
+    c_pointer::in, int::in, maybe_error::out, io::di, io::uo) is det.
+
+:- pred bind_null(db(RwRo)::in, stmt::in, bind_index::in,
+    maybe_error::out, io::di, io::uo) is det.
+
+:- pred step(db(RwRo)::in, sqlite3.stmt::in, step_result::out,
+    io::di, io::uo) is det.
+
+:- pred reset(db(RwRo)::in, stmt::in, maybe_error::out,
+    io::di, io::uo) is det.
+
+:- pred finalize(stmt::in, io::di, io::uo) is det.
+
+%-----------------------------------------------------------------------------%
+
+:- pred column_is_null(stmt::in, column::in, bool::out,
+    io::di, io::uo) is det.
+
+:- pred column_int(stmt::in, column::in, int::out,
+    io::di, io::uo) is det.
+
+:- pred column_float(stmt::in, column::in, float::out,
+    io::di, io::uo) is det.
+
+:- pred column_text(stmt::in, column::in, string::out,
+    io::di, io::uo) is det.
+
+:- pred column_maybe_text(stmt::in, column::in, maybe(string)::out,
+    io::di, io::uo) is det.
+
+:- pred column_blob(stmt::in, column::in, c_pointer::out, int::out,
+		    io::di, io::uo) is det.
+
+:- pred column_type(stmt::in, column::in, int::out,
+		    io::di, io::uo) is det.
+
+:- pred column(stmt::in, column::in, data_type::out, io::di, io::uo) is det.
+
+:- pred column_count(stmt::in, int::out, io::di, io::uo) is det.
+
+:- pred column_name(stmt::in, column::in, string::out,
+    io::di, io::uo) is det.
+
+:- pred data_count(stmt::in, int::out, io::di, io::uo) is det.
+
+:- pred db_handle(stmt::in, db(T)::out, io::di, io::uo) is det.
+
+:- func column_type_id(column_type) = int.
+
+%-----------------------------------------------------------------------------%
+
+:- func escape_LIKE_argument(char, string) = string.
+
+%-----------------------------------------------------------------------------%
+
+% High-level interface
+
+    % The bindings list is kept alive until the statement is finalized.
+    %
+:- pred with_stmt(
+    pred(db(RwRo), stmt, T, io, io)::in(pred(in, in, out(TI), di, uo) is det),
+    db(RwRo)::in, string::in, assoc_list(bind_index, data_type)::in,
+    T::out(TI), io::di, io::uo) is det.
+
+:- pred with_prepared_stmt(
+    pred(db(RwRo), stmt, T, io, io)::in(pred(in, in, out(TI), di, uo) is det),
+    db(RwRo)::in, stmt::in, assoc_list(bind_index, data_type)::in,
+    T::out(TI), io::di, io::uo) is det.
+
+:- pred with_stmt_acc(
+    pred(db(RwRo), stmt, T, T, io, io)::in(pred(in, in, in, out, di, uo) is det),
+    db(RwRo)::in, string::in, assoc_list(bind_index, data_type)::in,
+    T::in, T::out, io::di, io::uo) is det.
+
+:- pred with_stmt_acc3(
+    pred(db(RwRo), stmt, maybe_error, A, A, B, B, C, C, io, io),
+    db(RwRo), string, assoc_list(bind_index, data_type),
+    maybe_error, A, A, B, B, C, C, io, io).
+:- mode with_stmt_acc3(
+    in(pred(in, in, out, in, out, in, out, in, out, di, uo) is det),
+    in, in, in, out, in, out, in, out, in, out, di, uo) is det.
+:- mode with_stmt_acc3(
+    in(pred(in, in, out, in, out, in, out, array_di, array_uo, di, uo) is det),
+    in, in, in, out, in, out, in, out, array_di, array_uo, di, uo) is det.
+
+:- pred bind_checked(db(RwRo)::in, stmt::in,
+    assoc_list(bind_index, data_type)::in, io::di, io::uo) is det.
+
+:- pred step_ok(db(RwRo)::in, stmt::in, step_result::out(step_result_nonerror),
+    io::di, io::uo) is det.
+
+:- pred step_ok_keep_alive(db(RwRo)::in, stmt::in,
+    assoc_list(bind_index, data_type)::in,
+    step_result::out(step_result_nonerror), io::di, io::uo) is det.
+
+:- pred insert_row(db(rw)::in, stmt::in, maybe_error::out,
+    io::di, io::uo) is det.
+
+:- pred get_header(db(rw)::in, stmt::in, maybe_error(list(string))::out,
+    io::di, io::uo) is det.
+
+:- pred get_row(db(rw)::in, stmt::in, maybe_error(row_type)::out,
+    io::di, io::uo) is det.
+
+:- pred get_rows(db(rw)::in, stmt::in, maybe_error(table_type)::out,
+		 io::di, io::uo) is det.
+
+:- pred get_cols(db(rw)::in, stmt::in, list(list(data_type))::out,
+    io::di, io::uo) is det.
+
+:- pred write_table(db(rw)::in, % Db
+		    string::in, % TableName
+		    list(string)::in, % Headers
+		    list(list(data_type))::in, % Data
+		    io::di, io::uo) is det.
+
+:- pred read_query(db(rw)::in, % Db
+		   string::in, % Query
+		   maybe_error(list(string))::out, % Headers
+		   maybe_error(list(list(data_type)))::out, % Data
+		   io::di, io::uo) is det.
+
+
+%-----------------------------------------------------------------------------%
+%% utilities to support creating functions
+
+:- type context.
+
+:- type sqlite3_value.
+
+:- type sqlite3_value_array.
+
+:- type sqlite3_function.
+
+:- pred value_array_get(sqlite3_value_array::in, int32::in, sqlite3_value::out) is det.
+
+:- impure pred result_value(context::in, sqlite3_value::in) is det.
+
+:- pred value_double(sqlite3_value::in, float::out) is det.
+
+:- impure pred result_double(context::in, float::in) is det.
+
+:- pred create_sqlite3_function(db(_)::in, string::in, sqlite3_function::in,
+				string::out, io::di, io::uo) is det.
+#+end_src
+
