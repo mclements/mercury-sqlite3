@@ -16,8 +16,6 @@
 
 :- import_module float.
 
-:- use_module int32.
-
 %-----------------------------------------------------------------------------%
 
 :- type rw ---> rw.
@@ -268,7 +266,10 @@
 
 :- type sqlite3_function.
 
-:- pred value_array_get(sqlite3_value_array::in, int32::in, sqlite3_value::out) is det.
+:- func lookup(sqlite3_value_array, int) = sqlite3_value is det.
+:- pred lookup(sqlite3_value_array::in, int::in, sqlite3_value::out) is det.
+:- func elem(int, sqlite3_value_array) = sqlite3_value.
+:- mode elem(in, in) = out is det.
 
 :- impure pred result_value(context::in, sqlite3_value::in) is det.
 :- impure pred result_double(context::in, float::in) is det.
@@ -372,11 +373,15 @@ init_multithreaded(Res, !IO) :-
 :- pragma foreign_type("C", sqlite3_function, "sqlite3_function").
 
 :- pragma foreign_proc("C",
-    value_array_get(Array::in, Index::in, Value::out),
+    lookup(Array::in, Index::in, Value::out),
     [promise_pure, will_not_call_mercury, thread_safe],
 "
-    Value = Array[Index];
+    Value = Array[(int32_t) Index];
 ").
+lookup(Array, Index) = Value :-
+    lookup(Array, Index, Value).
+elem(Index, Array) = Elem :-
+    lookup(Array, Index, Elem).
 
 :- pragma foreign_proc("C",
     result_value(Context::in, Value::in),

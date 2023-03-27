@@ -84,11 +84,9 @@ static void noopfunc(sqlite3_context *context, int argc, sqlite3_value **argv) {
 %% create_sqlite3_function <- noopfunc2 (foreign_export+ptr) <- noopfunc2 (impure pred)
 :- impure pred noopfunc2(context::in, int32::in, sqlite3_value_array::in) is det.
 noopfunc2(Context, _Argc, Argv) :-
-    value_array_get(Argv, 0i32, Arg),
-    impure result_value(Context, Arg).
+    impure result_value(Context, Argv ^ elem(0)).
 :- pragma foreign_export("C", noopfunc2(in, in, in), "noopfunc2").
 :- func c_noopfunc2 = sqlite3_function.
 :- pragma foreign_proc("C", c_noopfunc2 = (Ptr::out),
 		       [thread_safe, promise_pure],
 		       "Ptr = noopfunc2;").
-
