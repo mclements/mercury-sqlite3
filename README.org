@@ -181,8 +181,9 @@ ok(["s", "count(*)", "sum(identity2(x))"])
 
 #+begin_src bash :exports results :results org
 LN=`grep -n -m 1 implementation sqlite3.m | cut -b 1-3`
-LN2=`expr $LN - 2`
-head sqlite3.m -n $LN | tail -n $LN2
+LN2=`expr $LN - 4`
+LN3=`expr $LN - 6`
+head sqlite3.m -n $LN2 | tail -n $LN3
 #+end_src
 
 #+RESULTS:
@@ -471,9 +472,5 @@ head sqlite3.m -n $LN | tail -n $LN2
 :- pred create_sqlite3_function(db(_)::in, string::in, sqlite3_function::in,
 				string::out, io::di, io::uo) is det.
 
-%-----------------------------------------------------------------------------%
-%-----------------------------------------------------------------------------%
-
-:- implementation.
 #+end_src
 
