@@ -40,16 +40,17 @@ test(!IO) :-
 	     read_query(Db, "select * from temp", Headers0, Output0, !IO),
 	     print_line(Headers0, !IO),
 	     print_line(Output0, !IO),
-	     Data2 = append(map(func(I) = [text("a"), float(float.float(I))], 1..1000),
-			    map(func(I) = [text("b"), float(float.float(I))], 1..500)),
+	     Data2 = append(map(func(I) = [text("Östersund"), float(float.float(I))], 1..1000),
+			    map(func(I) = [text("Göteborg"), float(float.float(I))], 1..500)),
 	     write_table(Db, "temp2", ["s", "x"], Data2, !IO),
 	     create_sqlite3_function(Db, "identity", c_noopfunc, _, !IO),
+	     create_sqlite3_function(Db, "identity2", c_noopfunc2, _, !IO),
+	     create_sqlite3_function(Db, "identity3", c_noopfunc3, _, !IO),
 	     Sql = "select s, count(*), sum(identity(x)) from temp2 group by s",
 	     read_query(Db, Sql, Headers, Output, !IO),
 	     print_line(Headers, !IO),
 	     print_line(Output, !IO),
-	     create_sqlite3_function(Db, "identity2", c_noopfunc2, _, !IO),
-	     Sql2 = "select s, count(*), sum(identity2(x)) from temp2 group by s",
+	     Sql2 = "select identity3(s), count(*), sum(identity2(x)) from temp2 group by s",
 	     read_query(Db, Sql2, Headers2, Output2, !IO),
 	     print_line(Headers2, !IO),
 	     Out2 = (ok(Out) = Output2 -> map(read3, Out) ; []),
@@ -90,3 +91,13 @@ noopfunc2(Context, _Argc, Argv) :-
 :- pragma foreign_proc("C", c_noopfunc2 = (Ptr::out),
 		       [thread_safe, promise_pure],
 		       "Ptr = noopfunc2;").
+
+:- impure pred noopfunc3(context::in, int32::in, sqlite3_value_array::in) is det.
+noopfunc3(Context, _Argc, Argv) :-
+    value_text(Argv ^ elem(0), Text),
+    impure result_text(Context, Text).
+:- pragma foreign_export("C", noopfunc3(in, in, in), "noopfunc3").
+:- func c_noopfunc3 = sqlite3_function.
+:- pragma foreign_proc("C", c_noopfunc3 = (Ptr::out),
+		       [thread_safe, promise_pure],
+		       "Ptr = noopfunc3;").
