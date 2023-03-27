@@ -21,18 +21,13 @@ maybe_int(Value) = (if Value = int(Int) then yes(Int) else no).
 :- func maybe_null(data_type) = maybe(data_type).
 maybe_null(Value) = (if Value = null then yes(null) else no).
 
-%% :- func reader(column_type) = (func(data) = T(column_type)).
-%% reader(ColumnType) = F :-
-%%     ColumnType = integer -> F = (func(Data) = maybe_int(Data))
-%%     ;
-
-:- func read3(list(data_type)) = {maybe(string), maybe(int), maybe(float)}.
-read3(Value) =
-(if Value = [A,B,C] then {maybe_string(A),maybe_int(B),maybe_float(C)} else {no,no,no}).
+%% :- func read3(list(data_type)) = {maybe(string), maybe(int), maybe(float)}.
+%% read3(Value) =
+%% (if Value = [A,B,C] then {maybe_string(A),maybe_int(B),maybe_float(C)} else {no,no,no}).
 
 :- type r ---> r(string,int,float).
-:- func read3b(list(data_type)) = maybe(r).
-read3b(Value) =
+:- func read3(list(data_type)) = maybe(r).
+read3(Value) =
 (if Value = [text(A),int(B),float(C)] then yes(r(A,B,C)) else no).
 
 :- pred test(io::di, io::uo) is det.
@@ -57,7 +52,7 @@ test(!IO) :-
 	     Sql2 = "select s, count(*), sum(identity2(x)) from temp2 group by s",
 	     read_query(Db, Sql2, Headers2, Output2, !IO),
 	     print_line(Headers2, !IO),
-	     Out2 = (ok(Out) = Output2 -> map(read3b, Out) ; []),
+	     Out2 = (ok(Out) = Output2 -> map(read3, Out) ; []),
 	     print_line(Out2, !IO)
 	 ),
 	 close(Db, !IO)
