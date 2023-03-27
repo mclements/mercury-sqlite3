@@ -271,10 +271,15 @@
 :- pred value_array_get(sqlite3_value_array::in, int32::in, sqlite3_value::out) is det.
 
 :- impure pred result_value(context::in, sqlite3_value::in) is det.
+:- impure pred result_double(context::in, float::in) is det.
+:- impure pred result_int(context::in, int::in) is det.
+:- impure pred result_blob(context::in, c_pointer::in, int::in) is det.
+:- impure pred result_text(context::in, string::in) is det.
 
 :- pred value_double(sqlite3_value::in, float::out) is det.
-
-:- impure pred result_double(context::in, float::in) is det.
+:- pred value_int(sqlite3_value::in, int::out) is det.
+:- pred value_text(sqlite3_value::in, string::out) is det.
+:- pred value_blob(sqlite3_value::in, c_pointer::out, int::out) is det.
 
 :- pred create_sqlite3_function(db(_)::in, string::in, sqlite3_function::in,
 				string::out, io::di, io::uo) is det.
@@ -389,10 +394,60 @@ init_multithreaded(Res, !IO) :-
 ").
 
 :- pragma foreign_proc("C",
+    value_int(Value::in, Int::out),
+    [promise_pure, will_not_call_mercury, thread_safe],
+"
+    Int = sqlite3_value_int(Value);
+    /* printf(\"%i\\n\",Int); */
+").
+
+:- pragma foreign_proc("C",
+    value_text(Value::in, Str::out),
+    [promise_pure, will_not_call_mercury, thread_safe],
+"
+    const unsigned char *s =  sqlite3_value_text(Value);
+    if (s) {
+        MR_make_aligned_string_copy_msg(Str, (const char *)s, MR_ALLOC_ID);
+    } else {
+        Str = MR_make_string_const("""");
+    }
+    /* printf(\"%s\\n\", Str); */
+").
+
+:- pragma foreign_proc("C",
+    value_blob(Value::in, Pointer::out, SizeBytes::out),
+    [promise_pure, will_not_call_mercury, thread_safe],
+"
+    Pointer = (MR_Word) sqlite3_value_blob(Value);
+    SizeBytes = sqlite3_value_bytes(Value);
+").
+
+:- pragma foreign_proc("C",
     result_double(Context::in, Value::in),
     [will_not_call_mercury, thread_safe],
 "
     sqlite3_result_double(Context, Value);
+").
+
+:- pragma foreign_proc("C",
+    result_int(Context::in, Value::in),
+    [will_not_call_mercury, thread_safe],
+"
+    sqlite3_result_int(Context, Value);
+").
+
+:- pragma foreign_proc("C",
+    result_blob(Context::in, Pointer::in, N::in),
+    [will_not_call_mercury, thread_safe],
+"
+    sqlite3_result_blob(Context, (void *)Pointer, N, SQLITE_STATIC);
+").
+
+:- pragma foreign_proc("C",
+    result_text(Context::in, Value::in),
+    [will_not_call_mercury, thread_safe],
+"
+    sqlite3_result_text(Context, Value, strlen(Value), SQLITE_STATIC);
 ").
 
 :- pragma foreign_proc("C",
