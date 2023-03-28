@@ -94,8 +94,8 @@ noopfunc2(Context, _Argc, Argv) :-
 
 :- impure pred noopfunc3(context::in, int32::in, sqlite3_value_array::in) is det.
 noopfunc3(Context, _Argc, Argv) :-
-    value(Argv ^ elem(0), Value),
-    impure result(Context, Value).
+    value_text(Argv ^ elem(0), Text),
+    impure result_text(Context, "Region: " ++ Text).
 :- pragma foreign_export("C", noopfunc3(in, in, in), "noopfunc3").
 :- func c_noopfunc3 = sqlite3_function.
 :- pragma foreign_proc("C", c_noopfunc3 = (Ptr::out),
