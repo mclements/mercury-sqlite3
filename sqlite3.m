@@ -276,11 +276,15 @@
 :- impure pred result_int(context::in, int::in) is det.
 :- impure pred result_blob(context::in, c_pointer::in, int::in) is det.
 :- impure pred result_text(context::in, string::in) is det.
+:- impure pred result_null(context::in) is det.
+:- impure pred result(context::in, data_type::in) is det.
 
 :- pred value_double(sqlite3_value::in, float::out) is det.
 :- pred value_int(sqlite3_value::in, int::out) is det.
 :- pred value_text(sqlite3_value::in, string::out) is det.
 :- pred value_blob(sqlite3_value::in, c_pointer::out, int::out) is det.
+:- pred value(sqlite3_value::in, data_type::out) is det.
+:- func value_type(sqlite3_value) =int is det.
 
 :- pred create_sqlite3_function(db(_)::in, string::in, sqlite3_function::in,
 				string::out, io::di, io::uo) is det.
@@ -391,6 +395,13 @@ elem(Index, Array) = Elem :-
 ").
 
 :- pragma foreign_proc("C",
+    value_type(Value::in) = (Type::out),
+    [promise_pure, will_not_call_mercury, thread_safe],
+"
+    Type = sqlite3_value_type(Value);
+").
+
+:- pragma foreign_proc("C",
     value_double(Value::in, Float::out),
     [promise_pure, will_not_call_mercury, thread_safe],
 "
@@ -427,6 +438,31 @@ elem(Index, Array) = Elem :-
     SizeBytes = sqlite3_value_bytes(Value);
 ").
 
+value(Data, Res) :-
+    Type = value_type(Data),
+    (Type = 1 -> value_int(Data, Int),
+		 Res = int(Int)
+    ;
+    Type = 2 -> value_double(Data, Float),
+		Res = float(Float)
+    ;
+    Type = 3 -> value_text(Data, Text),
+		Res = text(Text)
+    ;
+    Type = 4 -> value_blob(Data, Pointer, SizeBytes),
+		Res = blob(Pointer, SizeBytes)
+    ;
+    % Type = 5 ->
+    Res = null
+    ).
+
+:- pragma foreign_proc("C",
+    result_null(Context::in),
+    [will_not_call_mercury, thread_safe],
+"
+    sqlite3_result_null(Context);
+").
+
 :- pragma foreign_proc("C",
     result_double(Context::in, Value::in),
     [will_not_call_mercury, thread_safe],
@@ -454,6 +490,23 @@ elem(Index, Array) = Elem :-
 "
     sqlite3_result_text(Context, Value, strlen(Value), SQLITE_STATIC);
 ").
+
+result(Context, Value) :-
+    (
+        Value = int(Int) ->
+        impure result_int(Context, Int)
+    ;
+        Value = float(Float) ->
+        impure result_double(Context, Float)
+    ;
+        Value = text(String) ->
+        impure result_text(Context, String)
+    ;
+        Value = blob(Pointer, SizeBytes) ->
+        impure result_blob(Context, Pointer, SizeBytes)
+    ;
+        impure result_null(Context)
+    ).
 
 :- pragma foreign_proc("C",
     create_sqlite3_function(Db::in, SqlName::in, Func::in, Error::out, _IO0::di, _IO::uo),
