@@ -157,7 +157,7 @@ noopfunc2(Context, _Argc, Argv) :-
 :- impure pred noopfunc3(context::in, int32::in, sqlite3_value_array::in) is det.
 noopfunc3(Context, _Argc, Argv) :-
     value_text(Argv ^ elem(0), Text),
-    impure result_text(Context, Text).
+    impure result_text(Context, "Region: " ++ Text).
 :- pragma foreign_export("C", noopfunc3(in, in, in), "noopfunc3").
 :- func c_noopfunc3 = sqlite3_function.
 :- pragma foreign_proc("C", c_noopfunc3 = (Ptr::out),
@@ -182,7 +182,7 @@ ok([[text("a"), float(1.0)], [text("a"), float(2.0)], [text("a"), float(3.0)], [
 ok(["s", "count(*)", "sum(identity(x))"])
 ok([[text("Göteborg"), int(500), float(125250.0)], [text("Östersund"), int(1000), float(500500.0)]])
 ok(["identity3(s)", "count(*)", "sum(identity2(x))"])
-[yes(r("Göteborg", 500, 125250.0)), yes(r("Östersund", 1000, 500500.0))]
+[yes(r("Region: Göteborg", 500, 125250.0)), yes(r("Region: Östersund", 1000, 500500.0))]
 #+end_src
 
 
@@ -473,11 +473,15 @@ head sqlite3.m -n $LN2 | tail -n $LN3
 :- impure pred result_int(context::in, int::in) is det.
 :- impure pred result_blob(context::in, c_pointer::in, int::in) is det.
 :- impure pred result_text(context::in, string::in) is det.
+:- impure pred result_null(context::in) is det.
+:- impure pred result(context::in, data_type::in) is det.
 
 :- pred value_double(sqlite3_value::in, float::out) is det.
 :- pred value_int(sqlite3_value::in, int::out) is det.
 :- pred value_text(sqlite3_value::in, string::out) is det.
 :- pred value_blob(sqlite3_value::in, c_pointer::out, int::out) is det.
+:- pred value(sqlite3_value::in, data_type::out) is det.
+:- func value_type(sqlite3_value) =int is det.
 
 :- pred create_sqlite3_function(db(_)::in, string::in, sqlite3_function::in,
 				string::out, io::di, io::uo) is det.
