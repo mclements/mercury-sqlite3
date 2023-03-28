@@ -265,6 +265,7 @@
 :- type sqlite3_value_array.
 
 :- type sqlite3_function.
+:- type sqlite3_final.
 
 :- func lookup(sqlite3_value_array, int) = sqlite3_value is det.
 :- pred lookup(sqlite3_value_array::in, int::in, sqlite3_value::out) is det.
@@ -287,6 +288,9 @@
 :- func value_type(sqlite3_value) =int is det.
 
 :- pred create_sqlite3_function(db(_)::in, string::in, sqlite3_function::in,
+				string::out, io::di, io::uo) is det.
+:- pred create_sqlite3_function(db(_)::in, string::in,
+				sqlite3_function::in, sqlite3_function::in, sqlite3_final::in, 
 				string::out, io::di, io::uo) is det.
 
 %-----------------------------------------------------------------------------%
@@ -375,6 +379,10 @@ init_multithreaded(Res, !IO) :-
 :- pragma foreign_decl("C", 
 		       "typedef void (*sqlite3_function)(sqlite3_context*,int,sqlite3_value**);").
 :- pragma foreign_type("C", sqlite3_function, "sqlite3_function").
+
+:- pragma foreign_decl("C", 
+		       "typedef void (*sqlite3_final)(sqlite3_context*);").
+:- pragma foreign_type("C", sqlite3_final, "sqlite3_final").
 
 :- pragma foreign_proc("C",
     lookup(Array::in, Index::in, Value::out),
@@ -514,6 +522,22 @@ result(Context, Value) :-
 "
     int rc = sqlite3_create_function(Db, SqlName, 1, SQLITE_UTF8, NULL, Func, 
                                  NULL, NULL); 
+    if (rc != SQLITE_OK) { 
+        Error = MR_make_string(MR_ALLOC_ID,
+            \"sqlite3_create_function returned: %d\", rc);
+        } else {
+            Error = MR_make_string_const(\"\");
+        }
+"
+).
+
+:- pragma foreign_proc("C",
+		       create_sqlite3_function(Db::in, SqlName::in, Func::in, Step::in, Final::in,
+					       Error::out, _IO0::di, _IO::uo),
+    [promise_pure, thread_safe, tabled_for_io],
+"
+    int rc = sqlite3_create_function(Db, SqlName, 1, SQLITE_UTF8, NULL, Func, 
+                                 Step, Final); 
     if (rc != SQLITE_OK) { 
         Error = MR_make_string(MR_ALLOC_ID,
             \"sqlite3_create_function returned: %d\", rc);
